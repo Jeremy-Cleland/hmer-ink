@@ -96,13 +96,46 @@ class TransformerDecoder(nn.Module):
         # Add positional encoding
         tgt_embedded = self.pos_encoder(tgt_embedded)
 
-        # Apply transformer decoder
+        # Convert boolean mask to float mask to avoid type mismatches
+        # This fixes the "mismatched key_padding_mask and attn_mask" warning
+        memory_mask = None
+        if memory_key_padding_mask is not None:
+            # Use memory mask instead of memory_key_padding_mask
+            if memory_key_padding_mask.dtype == torch.bool:
+                # Create a cross-attention mask with shape [tgt_len, src_len] 
+                # For Transformer, the memory mask should have shape [tgt_len, src_len]
+                tgt_len = tgt.size(1)
+                src_len = memory.size(1)
+                
+                # First expand the padding mask to shape [batch_size, tgt_len, src_len]
+                expanded_mask = memory_key_padding_mask.unsqueeze(1).expand(-1, tgt_len, -1)
+                
+                # Then create a mask of shape [tgt_len, src_len] where each position 
+                # is masked if ANY batch element is masked at that position
+                memory_mask = torch.zeros(
+                    (tgt_len, src_len), 
+                    device=memory_key_padding_mask.device, 
+                    dtype=torch.float
+                )
+                
+                # If any batch element has padding at a source position, mask it for all batches
+                # We first collapse the batch dimension with a logical OR
+                combined_mask = expanded_mask.any(dim=0)
+                memory_mask.masked_fill_(combined_mask, float('-inf'))
+            else:
+                # If the mask is already a float mask, reshape it to [tgt_len, src_len]
+                tgt_len = tgt.size(1)
+                src_len = memory.size(1)
+                memory_mask = memory_key_padding_mask.view(-1, src_len).mean(dim=0)
+                memory_mask = memory_mask.expand(tgt_len, src_len)
+
+        # Apply transformer decoder using memory mask instead of key_padding_mask
         output = self.transformer_decoder(
             tgt_embedded,
             memory,
             tgt_mask=tgt_mask,
             tgt_key_padding_mask=tgt_padding_mask,
-            memory_key_padding_mask=memory_key_padding_mask,
+            memory_mask=memory_mask,
         )
 
         # Project to vocabulary

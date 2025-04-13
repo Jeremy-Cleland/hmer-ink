@@ -6,7 +6,7 @@ data:
   train_dirs: ["train", "synthetic", "symbols"]  # Use all available training data
   valid_dir: "valid"
   test_dir: "test"
-  max_seq_length: 1024  # Increased from 512 for better handling of complex expressions
+  max_seq_length: 512
   max_token_length: 256  # Increased to handle longer LaTeX expressions
   use_synthetic: true  # Leverage synthetic data
   normalization:
@@ -43,7 +43,7 @@ model:
 
 # Training settings
 training:
-  batch_size: 64  # Adjust based on your GPU/MPS memory
+  batch_size: 32
   learning_rate: 0.0003  # Slightly lower learning rate for stability
   weight_decay: 0.0001
   num_epochs: 100  # Train for longer
@@ -54,17 +54,18 @@ training:
     patience: 3
     threshold: 0.001
   optimizer: "adamw"  # Better weight decay handling
-  use_amp: true  # Automatic Mixed Precision for faster training
+  use_amp: true  # Mixed precision for faster training
   device: "mps"  # For Apple Silicon
   num_workers: 4
-  gradient_accumulation_steps: 2  # Accumulate gradients for larger effective batch size
+  gradient_accumulation_steps: 4  # Accumulate gradients for larger effective batch size
   save_every_n_epochs: 1
   validate_every_n_steps: 1000
   clip_grad_norm: 1.0  # Add gradient clipping for stability
 
 # Evaluation settings
 evaluation:
-  batch_size: 32
+  batch_size: 16
+  device: "mps"  # Explicitly use MPS for evaluation
   metrics: ["edit_distance", "normalized_edit_distance", "exact_match", "expression_recognition_rate", "symbol_accuracy"]
   beam_size: 5  # Increased beam size for better results
 

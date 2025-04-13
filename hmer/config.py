@@ -179,15 +179,48 @@ def get_device(config: Dict[str, Any]):
     """
     import torch
 
-    device_name = config.get("device", "cuda").lower()
+    # 1. Check top-level 'device' key
+    device_name = config.get("device")
 
-    if device_name == "cuda" and torch.cuda.is_available():
-        return torch.device("cuda")
-    elif (
-        device_name == "mps"
-        and hasattr(torch.backends, "mps")
-        and torch.backends.mps.is_available()
-    ):
-        return torch.device("mps")
+    # 2. If not found, check 'training' section's 'device' key
+    if device_name is None:
+        device_name = config.get("training", {}).get("device")
+
+    # 3. If still not found, attempt auto-detection (MPS > CUDA > CPU)
+    if device_name is None:
+        print("Device not specified in config, attempting auto-detection...")
+        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            print("MPS available, using MPS.")
+            return torch.device("mps")
+        elif torch.cuda.is_available():
+            print("CUDA available, using CUDA.")
+            return torch.device("cuda")
+        else:
+            print("No GPU available, using CPU.")
+            return torch.device("cpu")
+
+    # 4. If device_name was specified, use it (checking availability)
+    device_name = str(device_name).lower()  # Ensure lowercase string
+    print(f"Device specified in config: '{device_name}'")
+    if device_name == "mps":
+        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            print("MPS available, using MPS.")
+            return torch.device("mps")
+        else:
+            print("Warning: MPS requested but not available. Falling back to CPU.")
+            return torch.device("cpu")
+    elif device_name == "cuda":
+        if torch.cuda.is_available():
+            print("CUDA available, using CUDA.")
+            return torch.device("cuda")
+        else:
+            print("Warning: CUDA requested but not available. Falling back to CPU.")
+            return torch.device("cpu")
+    elif device_name == "cpu":
+        print("Using CPU as specified.")
+        return torch.device("cpu")
     else:
+        print(
+            f"Warning: Unknown device '{device_name}' requested. Falling back to CPU."
+        )
         return torch.device("cpu")

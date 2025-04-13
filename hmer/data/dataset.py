@@ -120,7 +120,7 @@ class HMERDataset(Dataset):
 
         # Check if already cached
         if file_id in self.cache:
-            return self.cache[file_id]
+            return self.cache[file_id].copy()  # Return a copy to avoid modifying cache
 
         # Parse the file
         ink_data = self.parser.parse_inkml(file_path)

@@ -1,6 +1,6 @@
 # Makefile for HMER-Ink project
 
-.PHONY: clean-pyc clean-outputs clean-all lint lint-fix format typecheck check-all train evaluate test
+.PHONY: clean-pyc clean-outputs clean-all lint lint-fix format typecheck check-all train train-fast evaluate test
 
 clean-pyc:
 	find . -name '*.pyc' -exec rm -f {} +
@@ -65,6 +65,26 @@ train:
 		CONFIG_PATH="$(CONFIG)"; \
 	fi; \
 	python cli.py train --config $$CONFIG_PATH --output-dir outputs/$$EXPERIMENT_NAME
+
+# Fast train using optimized configuration for Apple Silicon
+# Usage: make train-fast [EXPERIMENT=name]
+train-fast:
+	@if [ -z "$(EXPERIMENT)" ]; then \
+		BASE_NAME="hmer-ink-fast"; \
+	else \
+		BASE_NAME="$(EXPERIMENT)-fast"; \
+	fi; \
+	if [[ "$$BASE_NAME" == *_v* ]]; then \
+		echo "Error: Please provide a base experiment name without version suffix (_v1, _v2, etc.)"; \
+		exit 1; \
+	fi; \
+	VERSION=1; \
+	while [ -d "outputs/registry/$$BASE_NAME_v$$VERSION" ]; do \
+		VERSION=$$((VERSION + 1)); \
+	done; \
+	EXPERIMENT_NAME="$$BASE_NAME_v$$VERSION"; \
+	echo "Starting fast training with optimized settings for experiment: $$EXPERIMENT_NAME"; \
+	python cli.py train --config configs/fasttraining.yaml --output-dir outputs/$$EXPERIMENT_NAME
 
 # Evaluate model
 # Usage: make evaluate MODEL=outputs/experiment_name/checkpoints/best_model.pt [CONFIG=configs/custom.yaml] [SPLIT=test]

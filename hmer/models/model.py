@@ -213,13 +213,16 @@ class HMERModel(nn.Module):
                     tgt_mask = self.decoder.generate_square_subsequent_mask(
                         tokens.shape[1]
                     ).to(device)
+                    
+                    # Get memory key padding mask for this beam
+                    beam_memory_mask = expanded_mask[beam_idx : beam_idx + 1] if expanded_mask is not None else None
+                    
+                    # Use the updated interface with proper mask shape handling
                     logits = self.decoder(
                         tokens,
                         expanded_memory[beam_idx : beam_idx + 1],
                         tgt_mask=tgt_mask,
-                        memory_key_padding_mask=expanded_mask[beam_idx : beam_idx + 1]
-                        if expanded_mask is not None
-                        else None,
+                        memory_key_padding_mask=beam_memory_mask,
                     )
                 else:
                     # For non-autoregressive decoders
