@@ -53,8 +53,18 @@ def train_epoch(model: nn.Module,
     total_loss = 0.0
     batch_count = 0
     
-    # Create scaler for AMP
-    scaler = torch.cuda.amp.GradScaler() if use_amp else None
+    # Create device-appropriate scaler for AMP
+    scaler = None
+    if use_amp:
+        if device.type == 'cuda':
+            scaler = torch.amp.GradScaler('cuda')
+        elif device.type == 'mps':
+            # MPS doesn't support AMP yet, so we'll proceed without it
+            logging.info("AMP not supported on MPS, training without it")
+            use_amp = False
+        else:  # CPU
+            logging.info("AMP not supported on CPU, training without it")
+            use_amp = False
     
     # Progress bar
     pbar = tqdm(dataloader, desc=f"Epoch {epoch} [Train]")
@@ -69,9 +79,9 @@ def train_epoch(model: nn.Module,
         # Zero gradients
         optimizer.zero_grad()
         
-        # Forward pass with AMP if enabled
-        if use_amp:
-            with torch.cuda.amp.autocast():
+        # Forward pass with AMP if enabled (CUDA only)
+        if use_amp and device.type == 'cuda':
+            with torch.amp.autocast(device_type='cuda'):
                 # Forward pass
                 logits = model(input_seq, target_seq[:, :-1], input_lengths, target_lengths - 1)
                 
@@ -90,7 +100,7 @@ def train_epoch(model: nn.Module,
             scaler.step(optimizer)
             scaler.update()
         else:
-            # Forward pass
+            # Forward pass (without AMP for MPS or CPU)
             logits = model(input_seq, target_seq[:, :-1], input_lengths, target_lengths - 1)
             
             # Calculate loss
@@ -105,6 +115,12 @@ def train_epoch(model: nn.Module,
             
             # Backward pass
             loss.backward()
+            
+            # Apply gradient clipping if configured
+            if hasattr(train_config, 'clip_grad_norm') and train_config.get('clip_grad_norm', 0) > 0:
+                clip_value = train_config.get('clip_grad_norm')
+                torch.nn.utils.clip_grad_norm_(model.parameters(), clip_value)
+                
             optimizer.step()
         
         # Update statistics
