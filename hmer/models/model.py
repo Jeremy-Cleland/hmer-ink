@@ -103,7 +103,8 @@ class HMERModel(nn.Module):
         input_lengths: Optional[torch.Tensor] = None,
         max_length: int = 128,
         beam_size: int = 4,
-    ) -> Tuple[List[List[int]], List[float]]:
+        fast_mode: bool = True,
+    ) -> Tuple[List[List[List[int]]], List[List[float]]]:
         """
         Generate sequences using beam search.
 
@@ -112,6 +113,7 @@ class HMERModel(nn.Module):
             input_lengths: Lengths of input sequences
             max_length: Maximum sequence length to generate
             beam_size: Beam size for beam search
+            fast_mode: Whether to use faster generation mode (recommended for validation)
 
         Returns:
             Tuple of:
@@ -124,7 +126,15 @@ class HMERModel(nn.Module):
 
             # Get batch size
             batch_size = input_seq.shape[0]
-
+            device = input_seq.device
+            
+            # If fast mode is enabled and we're using a small beam size, use a faster greedy search
+            if fast_mode and beam_size <= 2:
+                # For beam size 1 (greedy search) or 2 (simple beam) with small batch
+                return self._fast_generate(memory, src_padding_mask, max_length, 
+                                          beam_size, batch_size, device)
+            
+            # Otherwise, use standard beam search processing sample by sample
             # Initialize results
             all_beams = []
             all_scores = []
@@ -146,6 +156,213 @@ class HMERModel(nn.Module):
                 all_scores.append(scores)
 
             return all_beams, all_scores
+            
+    def _fast_generate(
+        self, 
+        memory: torch.Tensor, 
+        memory_padding_mask: Optional[torch.Tensor], 
+        max_length: int, 
+        beam_size: int,
+        batch_size: int,
+        device: torch.device
+    ) -> Tuple[List[List[List[int]]], List[List[float]]]:
+        """
+        Fast beam search implementation optimized for validation during training.
+        
+        Args:
+            memory: Encoder outputs [batch_size, seq_len, dim]
+            memory_padding_mask: Encoder padding mask
+            max_length: Maximum sequence length to generate
+            beam_size: Beam size (1 for greedy search, 2 for simple beam)
+            batch_size: Batch size
+            device: Device for computation
+            
+        Returns:
+            Tuple of:
+            - Generated sequences [batch_size, beam_size, seq_len]
+            - Sequence scores [batch_size, beam_size]
+        """
+        # For simplicity, we'll implement a faster greedy search
+        # when beam_size=1 and a simplified beam search when beam_size=2
+        
+        # Initialize with <sos> tokens for all examples in batch
+        sequences = torch.full((batch_size, 1), self.sos_token_id, 
+                               dtype=torch.long, device=device)
+        
+        # Keep track of finished sequences
+        is_finished = torch.zeros(batch_size, dtype=torch.bool, device=device)
+        
+        # Storage for final results
+        all_beams = [[] for _ in range(batch_size)]
+        all_scores = [[] for _ in range(batch_size)]
+        
+        # For beam search with beam_size=2
+        if beam_size == 2:
+            beam_sequences = [[] for _ in range(batch_size)]
+            beam_scores = [[] for _ in range(batch_size)]
+        
+        # Generate tokens up to max_length
+        for step in range(max_length):
+            # If all sequences are finished, break
+            if is_finished.all():
+                break
+                
+            # Prepare mask for autoregressive decoding
+            if self.autoregressive:
+                tgt_mask = self.decoder.generate_square_subsequent_mask(sequences.size(1)).to(device)
+                
+                # Get decoder outputs - handle smaller batches to avoid memory issues
+                try:
+                    decoder_outputs = self.decoder(
+                        sequences,
+                        memory,
+                        tgt_mask=tgt_mask,
+                        memory_key_padding_mask=memory_padding_mask
+                    )
+                except RuntimeError as e:
+                    if "shape" in str(e) or "size" in str(e):
+                        # Memory issue - fallback to sequential processing
+                        all_outputs = []
+                        for i in range(sequences.size(0)):
+                            seq_i = sequences[i:i+1]
+                            mem_i = memory[i:i+1] if memory.dim() > 2 else memory
+                            mask_i = memory_padding_mask[i:i+1] if memory_padding_mask is not None else None
+                            
+                            out_i = self.decoder(
+                                seq_i,
+                                mem_i,
+                                tgt_mask=tgt_mask,
+                                memory_key_padding_mask=mask_i
+                            )
+                            all_outputs.append(out_i)
+                        
+                        decoder_outputs = torch.cat(all_outputs, dim=0)
+                    else:
+                        # Not a shape-related error, re-raise
+                        raise
+            else:
+                # For non-autoregressive decoders
+                try:
+                    decoder_outputs, _ = self.decoder(
+                        sequences,
+                        memory,
+                        memory_key_padding_mask=memory_padding_mask
+                    )
+                except RuntimeError as e:
+                    if "shape" in str(e) or "size" in str(e):
+                        # Memory issue - fallback to sequential processing
+                        all_outputs = []
+                        for i in range(sequences.size(0)):
+                            seq_i = sequences[i:i+1]
+                            mem_i = memory[i:i+1] if memory.dim() > 2 else memory
+                            mask_i = memory_padding_mask[i:i+1] if memory_padding_mask is not None else None
+                            
+                            out_i, _ = self.decoder(
+                                seq_i,
+                                mem_i,
+                                memory_key_padding_mask=mask_i
+                            )
+                            all_outputs.append(out_i)
+                        
+                        decoder_outputs = torch.cat(all_outputs, dim=0)
+                    else:
+                        # Not a shape-related error, re-raise
+                        raise
+            
+            # Get probabilities for next token (last position)
+            logits = decoder_outputs[:, -1, :]
+            probs = F.log_softmax(logits, dim=-1)
+            
+            if beam_size == 1:
+                # Greedy search - just take the most likely token
+                next_token_logprobs, next_tokens = torch.max(probs, dim=-1)
+                
+                # Add chosen tokens to sequences where not finished
+                for i in range(batch_size):
+                    if not is_finished[i]:
+                        token = next_tokens[i].item()
+                        
+                        # Check if sequence is finished
+                        if token == self.eos_token_id:
+                            is_finished[i] = True
+                            # Store this completed sequence
+                            all_beams[i] = [sequences[i].tolist()]
+                            all_scores[i] = [0.0]  # Simplified score for fast validation
+                        
+                # Prepare next iteration - add tokens to sequences that aren't finished
+                if not is_finished.all():
+                    # Create mask for unfinished sequences
+                    active_mask = ~is_finished
+                    
+                    # Only update unfinished sequences
+                    active_next_tokens = next_tokens[active_mask].unsqueeze(1)
+                    sequences = torch.cat([sequences, torch.zeros_like(active_next_tokens)], dim=1)
+                    sequences[active_mask, -1] = next_tokens[active_mask]
+            
+            else:  # beam_size == 2
+                # Simple beam search with 2 candidates
+                next_token_logprobs, next_tokens = torch.topk(probs, k=2, dim=-1)
+                
+                # For each example in batch
+                new_sequences = []
+                for i in range(batch_size):
+                    if is_finished[i]:
+                        # Keep the same sequence for finished examples
+                        new_sequences.append(sequences[i:i+1])
+                        continue
+                        
+                    # Get 2 best next tokens for this example
+                    for j in range(2):
+                        token = next_tokens[i, j].item()
+                        token_logprob = next_token_logprobs[i, j].item()
+                        
+                        # Create new sequence with this token
+                        new_seq = torch.cat([
+                            sequences[i:i+1], 
+                            torch.tensor([[token]], device=device)
+                        ], dim=1)
+                        
+                        # Add to beam candidates
+                        beam_sequences[i].append(new_seq[0].tolist())
+                        beam_scores[i].append(-token_logprob)  # Negative log prob as score
+                        
+                        # If EOS token and best candidate, mark as finished
+                        if token == self.eos_token_id and j == 0:
+                            is_finished[i] = True
+                            # Store completed sequence
+                            all_beams[i] = [new_seq[0].tolist()]
+                            all_scores[i] = [-token_logprob]
+                            break
+                    
+                    # If not finished yet, continue with best sequence
+                    if not is_finished[i]:
+                        new_sequences.append(torch.tensor([beam_sequences[i][0]], device=device))
+                
+                # Update sequences for next iteration
+                if new_sequences:
+                    sequences = torch.cat(new_sequences, dim=0)
+        
+        # Handle any unfinished sequences
+        for i in range(batch_size):
+            if not all_beams[i]:
+                all_beams[i] = [sequences[i].tolist()]
+                all_scores[i] = [0.0]
+            
+            # For beam_size=2, fill second beam with best alternative
+            if beam_size == 2:
+                if len(all_beams[i]) < 2 and beam_sequences[i]:
+                    # Add the best alternative sequence
+                    all_beams[i].append(beam_sequences[i][1] if len(beam_sequences[i]) > 1 else all_beams[i][0])
+                    all_scores[i].append(beam_scores[i][1] if len(beam_scores[i]) > 1 else all_scores[i][0])
+        
+        # Ensure all examples have exactly beam_size results
+        for i in range(batch_size):
+            # Duplicate the first beam if needed to reach beam_size
+            while len(all_beams[i]) < beam_size:
+                all_beams[i].append(all_beams[i][0])
+                all_scores[i].append(all_scores[i][0])
+        
+        return all_beams, all_scores
 
     def _beam_search(
         self,

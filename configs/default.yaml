@@ -43,7 +43,7 @@ model:
 
 # Training settings
 training:
-  batch_size: 32
+  batch_size: 16  # Smaller batch size for MPS memory efficiency
   learning_rate: 0.0003  # Slightly lower learning rate for stability
   weight_decay: 0.0001
   num_epochs: 100  # Train for longer
@@ -56,10 +56,10 @@ training:
   optimizer: "adamw"  # Better weight decay handling
   use_amp: true  # Mixed precision for faster training
   device: "mps"  # For Apple Silicon
-  num_workers: 4
-  gradient_accumulation_steps: 4  # Accumulate gradients for larger effective batch size
+  num_workers: 2
+  gradient_accumulation_steps: 8  # Increased for larger effective batch size
   save_every_n_epochs: 1
-  validate_every_n_steps: 1000
+  validate_every_n_steps: 2000  # Reduced validation frequency for faster training
   clip_grad_norm: 1.0  # Add gradient clipping for stability
 
 # Evaluation settings

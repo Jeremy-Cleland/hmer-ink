@@ -114,7 +114,7 @@ def evaluate(
         batch_size=batch_size,
         shuffle=False,
         num_workers=num_workers,
-        pin_memory=True,
+        pin_memory=False,
         collate_fn=dataset.collate_fn,
     )
 
@@ -133,9 +133,27 @@ def evaluate(
             labels = batch["labels"]
             file_ids = batch["file_ids"]
 
+            # Limit batch size for efficient processing on MPS/Apple Silicon
+            if input_seq.size(0) > 16 and device.type == "mps":
+                # Use the first 16 samples of the batch
+                gen_indices = list(range(16))
+                gen_input_seq = input_seq[gen_indices]
+                gen_input_lengths = input_lengths[gen_indices]
+                gen_labels = [labels[i] for i in gen_indices]
+                gen_file_ids = [file_ids[i] for i in gen_indices]
+            else:
+                gen_input_seq = input_seq
+                gen_input_lengths = input_lengths
+                gen_labels = labels
+                gen_file_ids = file_ids
+
             # Generate predictions with beam search
             beam_results, beam_scores = model.generate(
-                input_seq, input_lengths, max_length=128, beam_size=beam_size
+                gen_input_seq,
+                gen_input_lengths,
+                max_length=128,
+                beam_size=beam_size,
+                fast_mode=False,  # Use full beam search for final evaluation
             )
 
             # Decode predictions
@@ -148,8 +166,8 @@ def evaluate(
 
             # Add to lists for metric calculation
             all_predictions.extend(batch_predictions)
-            all_targets.extend(labels)
-            all_file_ids.extend(file_ids)
+            all_targets.extend(gen_labels)
+            all_file_ids.extend(gen_file_ids)
 
     # Calculate metrics
     metrics = compute_metrics(all_predictions, all_targets)

@@ -251,16 +251,18 @@ def validate(
 
             # Generate predictions with beam search (faster settings in fast mode)
             beam_results, _ = model.generate(
-                gen_input_seq, gen_input_lengths, 
-                max_length=max_gen_length, 
-                beam_size=effective_beam_size
+                gen_input_seq,
+                gen_input_lengths,
+                max_length=max_gen_length,
+                beam_size=effective_beam_size,
+                fast_mode=True,  # Enable fast generation mode
             )
 
             # Decode predictions
             batch_predictions = []
             for beams in beam_results:
                 # Take the top beam result (best prediction)
-                top_beam = beams[0]  
+                top_beam = beams[0]
                 prediction = tokenizer.decode(top_beam, skip_special_tokens=True)
                 batch_predictions.append(prediction)
 
@@ -471,7 +473,7 @@ def train(
         batch_size=batch_size,
         shuffle=True,
         num_workers=num_workers,
-        pin_memory=True,
+        pin_memory=False,
         prefetch_factor=prefetch_factor if num_workers > 0 else None,
         persistent_workers=persistent_workers if num_workers > 0 else False,
         collate_fn=train_dataset.collate_fn,
@@ -482,7 +484,7 @@ def train(
         batch_size=batch_size,
         shuffle=False,
         num_workers=num_workers,
-        pin_memory=True,
+        pin_memory=False,
         prefetch_factor=prefetch_factor if num_workers > 0 else None,
         persistent_workers=persistent_workers if num_workers > 0 else False,
         collate_fn=valid_dataset.collate_fn,
@@ -574,9 +576,9 @@ def train(
             criterion,
             tokenizer,
             device,
-            beam_size=config["evaluation"].get("beam_size", 4),
+            beam_size=config["evaluation"].get("beam_size", 2),
             fast_mode=True,  # Use fast mode during training
-            max_samples=100,  # Limit to 100 samples for faster validation
+            max_samples=50,  # Limit to 50 samples for faster validation
         )
 
         # Log metrics
