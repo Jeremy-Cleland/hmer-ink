@@ -1,0 +1,82 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+env/
+ENV/
+.env
+.venv
+env.bak/
+venv.bak/
+
+# PyCharm
+.idea/
+*.iml
+*.iws
+*.ipr
+*.iws
+.idea_modules/
+
+# VSCode
+.vscode/
+*.code-workspace
+.history/
+
+# Project specific
+outputs/
+outputs/*/
+!outputs/.gitkeep
+!outputs/registry/.gitkeep
+!outputs/checkpoints/.gitkeep
+!outputs/logs/.gitkeep
+wandb/
+*.pt
+*.pth
+*.onnx
+*.ckpt
+*.png
+*.pdf
+*.jpg
+*.jpeg
+logs/
+.ipynb_checkpoints/
+*.json
+!outputs/registry/experiment_registry.json
+
+# OS specific
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Data directory
+data/*
+!data/readme.md
+
+# Jupyter
+.ipynb_checkpoints
+*/.ipynb_checkpoints/*

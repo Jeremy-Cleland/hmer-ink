@@ -1,0 +1,81 @@
+name: prime-vit
+channels:
+  - pytorch
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - numpy
+  - pandas
+  - matplotlib
+  - seaborn
+  - scikit-learn
+  - scikit-image
+  - plotly
+  - opencv
+  - pillow
+  - omegaconf
+  - typer
+  - pyyaml
+  - jinja2
+  - tqdm
+  - optuna
+  - pytest
+  - black
+  - isort
+  - flake8
+  - ruff
+  - pydantic
+  - mypy
+  - shap
+  - wandb
+  - networkx
+  - levenshtein
+  - editdistance
+  - albumentations
+  - pip
+  - pip:
+      # Core ML/DL
+      - torch
+      - torchvision
+      - torchmetrics
+      - torchaudio
+      - tensorboard
+      
+      # CLI and utilities
+      - rich
+      
+      # Dashboard and reporting
+      - streamlit>=1.26.0
+      - altair>=5.0.0
+      - tabulate
+      - kaleido
+      - umap-learn
+      
+      # Graph neural networks
+      - dgl
+      - torch-geometric
+      
+      # LaTeX utilities
+      - sympy
+      - pylatexenc
+      - latex2mathml
+      
+      # Additional packages for PRIME architectures
+      - timm  # For vision transformer components
+      - transformers  # For language model components
+      - diffusers  # For DDPM augmentation
+ 
+
+variables:
+  PYTORCH_ENABLE_MPS_FALLBACK: "1"
+  PYTORCH_MPS_VERBOSE: "1"
+  PYTORCH_MPS_HIGH_WATERMARK_RATIO: "0.0"  # Disabled memory ratio limit
+  PYTORCH_PREFER_CHANNELS_LAST: "1"
+  PYTORCH_MPS_ENABLE_EARLY_GRAPH_CAPTURE: "1"
+  PYTORCH_MPS_SEPARATE_DEVICE_ALLOC: "1"
+  PYTORCH_MPS_USE_SYSTEM_ALLOCATOR: "1"
+  HDF5_USE_FILE_LOCKING: "FALSE"
+  OMP_NUM_THREADS: "12"
+  MKL_NUM_THREADS: "12"
+  NO_ALBUMENTATIONS_UPDATE: "1"
