@@ -2,10 +2,12 @@
 Training script for HMER-Ink models.
 """
 
+import datetime
+import json
 import logging
 import os
 import sys
-from typing import Dict, Optional
+from typing import Dict, List, Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -20,6 +22,7 @@ from hmer.config import get_device, get_optimizer, get_scheduler, load_config
 from hmer.data.dataset import HMERDataset
 from hmer.data.transforms import get_eval_transforms, get_train_transforms
 from hmer.models import create_model
+from hmer.utils.error_analysis import analyze_errors
 from hmer.utils.metrics import compute_metrics
 from hmer.utils.tokenizer import LaTeXTokenizer
 
@@ -175,7 +178,7 @@ def validate(
     beam_size: int = 4,
     fast_mode: bool = True,
     max_samples: int = 100,  # Limit validation samples in fast mode
-) -> Dict[str, float]:
+) -> Tuple[Dict[str, float], List[float]]:
     """
     Validate model performance.
 
@@ -190,7 +193,9 @@ def validate(
         max_samples: Maximum number of samples to validate in fast mode
 
     Returns:
-        Dictionary with validation metrics
+        Tuple containing:
+        - Dictionary with validation metrics (averages)
+        - List of individual normalized edit distance scores for analyzed samples
     """
     model.eval()
     total_loss = 0.0
@@ -198,6 +203,7 @@ def validate(
 
     all_predictions = []
     all_targets = []
+    all_ned_scores = []  # List to store individual NED scores
 
     # In fast mode, use smaller beam size during training to speed up validation
     if fast_mode:
@@ -258,17 +264,22 @@ def validate(
                 fast_mode=True,  # Enable fast generation mode
             )
 
-            # Decode predictions
+            # Decode predictions and calculate individual NED scores
             batch_predictions = []
-            for beams in beam_results:
-                # Take the top beam result (best prediction)
+            batch_ned_scores = []
+            for idx, beams in enumerate(beam_results):
                 top_beam = beams[0]
                 prediction = tokenizer.decode(top_beam, skip_special_tokens=True)
+                target_label = gen_labels[idx]
+                # Calculate metrics for this single sample
+                sample_metrics = compute_metrics([prediction], [target_label])
                 batch_predictions.append(prediction)
+                batch_ned_scores.append(sample_metrics["normalized_edit_distance"])
 
-            # Add to lists for metric calculation
+            # Add to lists for metric calculation and individual scores
             all_predictions.extend(batch_predictions)
             all_targets.extend(gen_labels)
+            all_ned_scores.extend(batch_ned_scores)  # Store individual scores
             sample_count += len(batch_predictions)
 
             # Update statistics
@@ -281,12 +292,13 @@ def validate(
     # Calculate average loss
     avg_loss = total_loss / batch_count if batch_count > 0 else 0
 
-    # Calculate metrics
+    # Calculate aggregated metrics (using all collected predictions/targets)
     metrics = compute_metrics(all_predictions, all_targets)
     metrics["loss"] = avg_loss
     metrics["num_samples"] = sample_count
 
-    return metrics
+    # Return both aggregated metrics and the list of NED scores
+    return metrics, all_ned_scores
 
 
 def train(
@@ -342,9 +354,7 @@ def train(
             decoder_type = config["model"]["decoder"]["type"]
             model_name = f"{encoder_type}_{decoder_type}"
             # Add timestamp for uniqueness
-            from datetime import datetime
-
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             model_name = f"{model_name}_{timestamp}"
 
         # Create full model directory
@@ -610,7 +620,7 @@ def train(
         )
 
         # Validate
-        val_metrics = validate(
+        val_metrics, val_ned_scores = validate(
             model,
             valid_loader,
             criterion,
@@ -618,12 +628,18 @@ def train(
             device,
             beam_size=config["evaluation"].get("beam_size", 2),
             fast_mode=True,  # Use fast mode during training
-            max_samples=50,  # Limit to 50 samples for faster validation
+            max_samples=config["evaluation"].get(
+                "val_max_samples", 50
+            ),  # Use config value
         )
+
+        # Get current learning rate
+        current_lr = optimizer.param_groups[0]["lr"]
 
         # Log metrics
         logging.info(f"Epoch {epoch}:")
         logging.info(f"  Train Loss: {train_metrics['loss']:.4f}")
+        logging.info(f"  Learning Rate: {current_lr:.6f}")  # Log LR
         logging.info(f"  Valid Loss: {val_metrics['loss']:.4f}")
         logging.info(
             f"  Expression Recognition Rate: {val_metrics['expression_recognition_rate']:.4f}"
@@ -634,6 +650,9 @@ def train(
         # Update tensorboard
         if writer is not None:
             writer.add_scalar("Loss/train", train_metrics["loss"], epoch)
+            writer.add_scalar(
+                "LearningRate", current_lr, epoch
+            )  # Log LR to tensorboard
             for key, value in val_metrics.items():
                 writer.add_scalar(f"Valid/{key}", value, epoch)
 
@@ -692,101 +711,134 @@ def train(
                 except Exception as e:
                     logging.warning(f"Error creating error examples: {e}")
 
-            # Log to wandb
-            wandb.log(
-                {
-                    "epoch": epoch,
-                    "train_loss": train_metrics["loss"],
-                    **{f"val_{k}": v for k, v in val_metrics.items()},
-                }
-            )
+            # Log to wandb (include LR)
+            wandb_log_data = {
+                "epoch": epoch,
+                "learning_rate": current_lr,
+                "train_loss": train_metrics["loss"],
+                **{f"val_{k}": v for k, v in val_metrics.items()},
+            }
+            wandb.log(wandb_log_data)
 
             # Also log to our training monitor
             if config["output"].get("record_metrics", False):
                 try:
-                    # Use model-specific metrics directory that we created earlier
                     from scripts.training_monitor import capture_training_metrics
 
-                    # Create metrics dict with train and val metrics
                     monitor_metrics = {
                         "epoch": epoch,
                         "train_loss": train_metrics["loss"],
+                        "learning_rate": current_lr,  # Add LR here
                         "global_step": epoch * len(train_loader),
                         "model_name": os.path.basename(output_dir),
                         **{f"val_{k}": v for k, v in val_metrics.items()},
                     }
 
-                    # Log to our monitor
-                    capture_training_metrics(
-                        monitor_metrics, error_examples, metrics_dir
-                    )
-
-                    # Get predictions from validation results
+                    # --- Error Analysis Section ---
+                    error_analysis_results = None
                     try:
-                        # Extract predictions and targets from validation
+                        # Extract predictions and targets from validation (Limited Sample)
+                        # Note: This uses a limited sample (first 5 batches) for efficiency.
+                        #       Consider analyzing the full validation set offline for comprehensive results.
                         predictions = []
                         targets = []
 
+                        # Limit analysis to avoid slowing down training too much
+                        max_analysis_batches = config["evaluation"].get(
+                            "error_analysis_batches", 5
+                        )
+
                         for batch_idx, batch in enumerate(valid_loader):
-                            if (
-                                batch_idx >= 5
-                            ):  # Limit to first few batches for analysis
+                            if batch_idx >= max_analysis_batches:
                                 break
 
-                            # Extract targets from batch
                             batch_targets = batch["labels"]
-
-                            # Generate predictions for this batch
                             input_seq = batch["input"].to(device)
                             input_lengths = batch["input_lengths"].to(device)
 
                             with torch.no_grad():
+                                # Generate predictions (using faster settings)
                                 beam_results, _ = model.generate(
                                     input_seq,
                                     input_lengths,
-                                    max_length=64,  # Shorter for efficiency
-                                    beam_size=2,  # Small beam for speed
+                                    max_length=config["evaluation"].get(
+                                        "max_gen_length_fast", 64
+                                    ),
+                                    beam_size=config["evaluation"].get(
+                                        "beam_size_fast", 2
+                                    ),
                                     fast_mode=True,
                                 )
-
                                 # Decode predictions
                                 batch_predictions = []
                                 for beams in beam_results:
-                                    # Take the top beam result (best prediction)
                                     top_beam = beams[0]
                                     prediction = tokenizer.decode(
                                         top_beam, skip_special_tokens=True
                                     )
                                     batch_predictions.append(prediction)
 
-                            # Add to lists
                             predictions.extend(batch_predictions)
                             targets.extend(batch_targets)
 
-                        # Run error analysis on the collected predictions
-                        if len(predictions) > 0:
-                            from hmer.utils.error_analysis import analyze_errors
-
-                            error_analysis = analyze_errors(predictions, targets)
-
-                            # Save error analysis to metrics directory
-                            error_analysis_path = os.path.join(
-                                metrics_dir, f"error_analysis_epoch_{epoch}.json"
-                            )
-                            import json
-
-                            with open(error_analysis_path, "w") as f:
-                                json.dump(error_analysis, f, indent=2)
+                        # Run error analysis if we have predictions
+                        if predictions:
                             logging.info(
-                                f"Saved error analysis to {error_analysis_path}"
+                                f"Running error analysis on {len(predictions)} samples..."
                             )
-                    except Exception as e:
-                        logging.warning(f"Error analysis failed: {e}")
+                            error_analysis_results = analyze_errors(
+                                predictions, targets
+                            )
+                            logging.info("Error analysis complete.")
+                        else:
+                            logging.warning(
+                                "No predictions generated for error analysis sample."
+                            )
 
-                    logging.info(f"Recorded metrics to {metrics_dir}")
+                    except Exception as e:
+                        logging.warning(f"Error analysis during training failed: {e}")
+                    # --- End Error Analysis Section ---
+
+                    # --- Save Validation NED Scores ---
+                    val_ned_scores_path = None
+                    if val_ned_scores:
+                        val_ned_scores_path = os.path.join(
+                            metrics_dir, f"val_ned_scores_epoch_{epoch}.json"
+                        )
+                        try:
+                            # Convert numpy types just in case (though likely floats)
+                            ned_scores_to_save = [float(s) for s in val_ned_scores]
+                            with open(val_ned_scores_path, "w") as f:
+                                json.dump(ned_scores_to_save, f)
+                            logging.info(
+                                f"Saved validation NED scores to {val_ned_scores_path}"
+                            )
+                        except Exception as e:
+                            logging.warning(
+                                f"Failed to save validation NED scores: {e}"
+                            )
+                            val_ned_scores_path = (
+                                None  # Don't pass path if saving failed
+                            )
+
+                    # Log metrics, pass error analysis results, AND ned scores path
+                    capture_training_metrics(
+                        monitor_metrics,
+                        error_examples,
+                        error_analysis_data=error_analysis_results,
+                        val_ned_scores_path=val_ned_scores_path,  # Pass path to ned scores
+                        output_dir=metrics_dir,
+                    )
+                    logging.info(f"Recorded metrics and analysis to {metrics_dir}")
+
                 except ImportError:
-                    logging.info(
-                        "Training monitor not found. Metrics only logged to wandb."
+                    logging.warning(
+                        "Training monitor (scripts/training_monitor.py) not found or failed to import. Metrics cannot be logged locally or plotted."
+                    )
+                except Exception as e:
+                    # Catch potential errors during metric logging or analysis call
+                    logging.error(
+                        f"Failed to log metrics or run analysis via TrainingMonitor: {e}"
                     )
 
         # Update scheduler if using ReduceLROnPlateau
@@ -830,7 +882,7 @@ def train(
                 "epoch": epoch,
                 "metric_name": metric_name,
                 "metric_value": float(best_metric),
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": datetime.datetime.now().isoformat(),
                 "model_name": os.path.basename(output_dir),
             }
             best_model_info_path = os.path.join(output_dir, "best_model_info.json")
@@ -868,7 +920,7 @@ def train(
     model_summary_path = os.path.join(output_dir, "model_summary.md")
     with open(model_summary_path, "w") as f:
         f.write(f"# Model Summary: {os.path.basename(output_dir)}\n\n")
-        f.write(f"Created: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+        f.write(f"Created: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
 
         f.write("## Architecture\n")
         f.write(

@@ -7,6 +7,35 @@ from typing import Dict, List, Optional
 from hmer.utils.metrics import compute_metrics
 
 
+# Helper function for simple categorization
+def categorize_error(pred: str, ref: str) -> str:
+    """Simple categorization of errors."""
+    if pred == ref:
+        return "Correct"
+    if not pred:
+        return "Empty Prediction"
+    if len(pred) > 1 and all(c == pred[0] for c in pred):
+        return "Repeating Character"
+    if len(pred) < len(ref) / 2:
+        return "Too Short"
+    if len(pred) > len(ref) * 2:
+        return "Too Long"
+    # Check for structural issues (can be expanded)
+    if not check_balanced_delimiters(pred):
+        return "Unbalanced Delimiters"
+    if ("\\frac" in ref and "\\frac" not in pred) or (
+        "\\frac" not in ref and "\\frac" in pred
+    ):
+        return "Frac Detection Mismatch"
+    if ("\\sqrt" in ref and "\\sqrt" not in pred) or (
+        "\\sqrt" not in ref and "\\sqrt" in pred
+    ):
+        return "Sqrt Detection Mismatch"
+
+    # If none of the above, classify as other substitution/deletion/insertion
+    return "Substitution/Other"
+
+
 def analyze_errors(
     predictions: List[str],
     references: List[str],

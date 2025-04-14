@@ -2,6 +2,7 @@
 Training Monitor for HMER-Ink that provides comprehensive visualization of training metrics.
 """
 
+import glob  # Added for finding error analysis files
 import json
 import os
 import sys
@@ -15,7 +16,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from matplotlib.gridspec import GridSpec
+from matplotlib.ticker import MaxNLocator  # Added for integer ticks
+
+# Import the new plotting utility
+from hmer.utils.plotting import theme_registry
 
 
 def convert_numpy_types(obj: Any) -> Any:
@@ -57,11 +61,12 @@ class TrainingMonitor:
         """
         self.log_dir = log_dir
         self.metrics_file = os.path.join(log_dir, "training_metrics.json")
+        self.error_analysis_dir = log_dir  # Store the base directory for error jsons
         self.metrics_history: List[Dict[str, Any]] = []
-        self.error_examples_history: List[Dict[str, Any]] = []
 
         os.makedirs(log_dir, exist_ok=True)
-        os.makedirs(os.path.join(log_dir, "plots"), exist_ok=True)
+        self.plot_dir = os.path.join(log_dir, "plots")  # Define plot_dir
+        os.makedirs(self.plot_dir, exist_ok=True)
 
         # Load existing metrics if available
         if os.path.exists(self.metrics_file):
@@ -74,6 +79,8 @@ class TrainingMonitor:
         self,
         metrics: Dict[str, Union[float, int, str]],
         error_examples: Optional[List[Dict]] = None,
+        error_analysis_file: Optional[str] = None,
+        val_ned_scores_path: Optional[str] = None,
     ):
         """
         Log training metrics.
@@ -81,6 +88,8 @@ class TrainingMonitor:
         Args:
             metrics: Dictionary of metrics to log
             error_examples: List of error examples (optional)
+            error_analysis_file: Path to error analysis file (optional)
+            val_ned_scores_path: Path to saved validation NED scores (optional)
         """
         # Add timestamp
         metrics["timestamp"] = datetime.now().isoformat()
@@ -91,22 +100,18 @@ class TrainingMonitor:
         # Add to history
         self.metrics_history.append(metrics)
 
-        # Add error examples if provided
-        if error_examples:
-            # Convert NumPy types in error examples
-            error_examples = convert_numpy_types(error_examples)
-            self.error_examples_history.append(
-                {"epoch": metrics.get("epoch", 0), "examples": error_examples}
-            )
-
         # Save to file
         with open(self.metrics_file, "w") as f:
             json.dump(self.metrics_history, f, indent=2)
 
-        # Generate visualizations
-        self.generate_dashboard()
+        # Generate visualizations, pass the error analysis file path if available
+        self.generate_dashboard(error_analysis_file, val_ned_scores_path)
 
-    def generate_dashboard(self):
+    def generate_dashboard(
+        self,
+        error_analysis_file: Optional[str] = None,
+        val_ned_scores_path: Optional[str] = None,
+    ):
         """Generate comprehensive dashboard of training progress."""
         if not self.metrics_history:
             return
@@ -120,220 +125,329 @@ class TrainingMonitor:
 
         # Create dashboard figure
         self._plot_training_curves(plot_df)
+        self._plot_learning_rate(plot_df)
         self._plot_metric_correlations(plot_df)
-        self._create_summary_table(df)
-
-        # If we have error examples, visualize them
-        if self.error_examples_history:
-            self._visualize_error_examples()
+        self._plot_error_analysis(error_analysis_file)
+        self._plot_validation_distribution(val_ned_scores_path)
 
     def _plot_training_curves(self, df: pd.DataFrame):
-        """Plot key training curves."""
-        # Only use these if they exist
-        possible_metrics = [
-            # Main metrics
-            ("loss", "val_loss"),
-            ("val_accuracy", "val_exprate"),
-            ("val_cer", "val_ter"),  # Error rates
+        """Plot key training curves using the theme."""
+        if "epoch" not in df.columns:
+            print("No epoch data to plot training curves.")
+            return
+
+        epochs = df["epoch"]
+
+        # Define metrics to plot
+        loss_metrics = ["train_loss", "val_loss"]
+        other_metrics = [
+            "val_expression_recognition_rate",
+            "val_symbol_accuracy",
+            "val_edit_distance",
+            "val_normalized_edit_distance",  # Added Normalized ED
         ]
 
-        # Create a 2x2 grid of plots
-        fig = plt.figure(figsize=(15, 10))
-        gs = GridSpec(2, 2, figure=fig)
+        # Filter available metrics
+        available_loss = [m for m in loss_metrics if m in df.columns]
+        available_other = [m for m in other_metrics if m in df.columns]
 
-        # Plot main training curve (always plot if exists)
-        if "loss" in df.columns or "val_loss" in df.columns:
-            ax1 = fig.add_subplot(gs[0, :])
-            if "loss" in df.columns:
-                ax1.plot(df["epoch"], df["loss"], "b-", label="Training Loss")
-            if "val_loss" in df.columns:
-                ax1.plot(df["epoch"], df["val_loss"], "r-", label="Validation Loss")
-            ax1.set_title("Training & Validation Loss")
-            ax1.set_xlabel("Epoch")
-            ax1.set_ylabel("Loss")
-            ax1.legend()
-            ax1.grid(True)
+        if not available_loss and not available_other:
+            print("No metrics found to plot training curves.")
+            return
 
-        # Plot additional metric pairs
-        plot_idx = 0
-        for i, (metric1, metric2) in enumerate(possible_metrics[1:]):
-            if metric1 in df.columns or metric2 in df.columns:
-                row, col = 1, plot_idx
-                ax = fig.add_subplot(gs[row, col])
+        # Use theme settings for figure size etc.
+        fig, axes = plt.subplots(
+            2,
+            1,
+            sharex=True,
+            figsize=theme_registry.current_theme.get("figure_size", (12, 10)),
+        )
+        fig.suptitle("Training Progress", fontsize=16)
+        theme_registry.style_plot(fig, axes[0])  # Style figure and first axis
+        theme_registry.style_axis(axes[1])  # Style second axis
 
-                if metric1 in df.columns:
-                    ax.plot(df["epoch"], df[metric1], "g-", label=metric1)
-                if metric2 in df.columns:
-                    ax.plot(df["epoch"], df[metric2], "m-", label=metric2)
+        # --- Plot Loss ---
+        ax1 = axes[0]
+        palette = theme_registry.get_palette(len(available_loss))
+        for i, metric in enumerate(available_loss):
+            ax1.plot(
+                epochs,
+                df[metric],
+                label=metric.replace("_", " ").title(),
+                color=palette[i],
+                linewidth=2,
+            )
+        ax1.set_ylabel("Loss")
+        ax1.set_title("Training & Validation Loss")
+        ax1.legend()
+        ax1.grid(True, linestyle="--", alpha=0.6)
 
-                ax.set_title(f"{metric1} & {metric2}")
-                ax.set_xlabel("Epoch")
-                ax.set_ylabel("Value")
-                ax.legend()
-                ax.grid(True)
+        # --- Plot Other Metrics ---
+        ax2 = axes[1]
+        palette = theme_registry.get_palette(len(available_other))
+        lines = []
+        labels = []
+        for i, metric in enumerate(available_other):
+            # Use secondary y-axis for edit distance if its scale is very different?
+            # For now, plot on the same axis.
+            (line,) = ax2.plot(
+                epochs,
+                df[metric],
+                label=metric.replace("_", " ").title(),
+                color=palette[i],
+                linewidth=2,
+            )
+            lines.append(line)
+            labels.append(metric.replace("_", " ").title())
 
-                plot_idx += 1
-                if plot_idx >= 2:  # We only have 2 slots in the bottom row
-                    break
+        ax2.set_xlabel("Epoch")
+        ax2.set_ylabel("Metric Value")
+        ax2.set_title("Validation Metrics")
+        ax2.legend(lines, labels)
+        ax2.grid(True, linestyle="--", alpha=0.6)
+        # Ensure x-axis shows integer epochs
+        ax1.xaxis.set_major_locator(MaxNLocator(integer=True))
+        ax2.xaxis.set_major_locator(MaxNLocator(integer=True))
+
+        plt.tight_layout(
+            rect=[0, 0.03, 1, 0.97]
+        )  # Adjust layout to prevent title overlap
+        save_path = os.path.join(self.plot_dir, "training_curves.png")
+        plt.savefig(save_path, dpi=theme_registry.current_theme.get("dpi", 300))
+        plt.close(fig)
+        print(f"Saved training curves plot to {save_path}")
+
+    def _plot_learning_rate(self, df: pd.DataFrame):
+        """Plot the learning rate schedule over epochs."""
+        if "epoch" not in df.columns or "learning_rate" not in df.columns:
+            print("No epoch or learning_rate data to plot.")
+            return
+
+        fig, ax = plt.subplots(
+            figsize=theme_registry.current_theme.get("figure_size", (10, 5))
+        )
+        theme_registry.style_plot(fig, ax)
+
+        palette = theme_registry.get_palette(1)
+        ax.plot(
+            df["epoch"],
+            df["learning_rate"],
+            label="Learning Rate",
+            color=palette[0],
+            linewidth=2,
+        )
+
+        ax.set_xlabel("Epoch")
+        ax.set_ylabel("Learning Rate")
+        ax.set_title("Learning Rate Schedule")
+        ax.legend()
+        ax.grid(True, linestyle="--", alpha=0.6)
+        ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+        # Use scientific notation if values are very small
+        ax.ticklabel_format(style="sci", axis="y", scilimits=(0, 0))
 
         plt.tight_layout()
-        plt.savefig(
-            os.path.join(self.log_dir, "plots", "training_curves.png"),
-            dpi=100,
-            bbox_inches="tight",
-        )
-        plt.close()
+        save_path = os.path.join(self.plot_dir, "learning_rate_schedule.png")
+        plt.savefig(save_path, dpi=theme_registry.current_theme.get("dpi", 300))
+        plt.close(fig)
+        print(f"Saved learning rate plot to {save_path}")
 
     def _plot_metric_correlations(self, df: pd.DataFrame):
-        """Plot correlations between key metrics."""
-        # Select relevant metrics for correlation
-        corr_metrics = ["val_loss", "val_accuracy", "val_exprate", "val_cer", "val_ter"]
+        """Plot correlations between key metrics using the theme."""
+        corr_metrics = [
+            "train_loss",
+            "val_loss",
+            "val_expression_recognition_rate",
+            "val_symbol_accuracy",
+            "val_edit_distance",
+            "val_normalized_edit_distance",
+        ]
         available_metrics = [m for m in corr_metrics if m in df.columns]
 
         if len(available_metrics) < 2:
-            return  # Need at least 2 metrics for correlation
+            return
 
-        # Calculate correlation matrix
         corr = df[available_metrics].corr()
 
-        # Plot correlation heatmap
-        plt.figure(figsize=(10, 8))
-        sns.heatmap(corr, annot=True, cmap="coolwarm", vmin=-1, vmax=1, center=0)
-        plt.title("Metric Correlations")
-        plt.tight_layout()
-        plt.savefig(
-            os.path.join(self.log_dir, "plots", "metric_correlations.png"),
-            dpi=100,
-            bbox_inches="tight",
+        fig, ax = plt.subplots(
+            figsize=theme_registry.current_theme.get("figure_size", (10, 8))
         )
-        plt.close()
+        theme_registry.style_plot(fig, ax)  # Apply theme
 
-    def _create_summary_table(self, df: pd.DataFrame):
-        """Create a summary table of key metrics."""
-        # Get the latest metrics and best metrics
-        latest = df.iloc[-1].to_dict()
+        cmap = theme_registry.get_diverging_cmap()
+        sns.heatmap(
+            corr, annot=True, cmap=cmap, vmin=-1, vmax=1, center=0, ax=ax, fmt=".2f"
+        )
+        ax.set_title("Metric Correlations")
+        plt.tight_layout()
+        save_path = os.path.join(self.plot_dir, "metric_correlations.png")
+        plt.savefig(save_path, dpi=theme_registry.current_theme.get("dpi", 300))
+        plt.close(fig)
+        print(f"Saved metric correlations plot to {save_path}")
 
-        # Find best values for each metric
-        best = {}
-        for col in df.columns:
-            if col.startswith("val_"):
-                if "loss" in col or "cer" in col or "ter" in col:
-                    # Lower is better for these metrics
-                    best[col] = df[col].min()
-                else:
-                    # Higher is better for accuracy, exprate
-                    best[col] = df[col].max()
-
-        # Create a summary table
-        summary = {"Latest": latest, "Best": best}
-
-        # Convert NumPy types to Python native types for JSON serialization
-        summary = convert_numpy_types(summary)
-
-        # Save as JSON
-        with open(os.path.join(self.log_dir, "latest_summary.json"), "w") as f:
-            json.dump(summary, f, indent=2)
-
-        # Also create a markdown table for easy viewing
-        with open(os.path.join(self.log_dir, "latest_summary.md"), "w") as f:
-            f.write("# Training Summary\n\n")
-            f.write(f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
-
-            f.write(
-                "## Latest Metrics (Epoch {})\n\n".format(latest.get("epoch", "N/A"))
+    def _plot_error_analysis(self, error_analysis_file: Optional[str] = None):
+        """Plot error analysis results from the latest JSON file."""
+        if error_analysis_file is None:
+            # Find the latest error analysis file if not provided
+            error_files = glob.glob(
+                os.path.join(self.error_analysis_dir, "error_analysis_epoch_*.json")
             )
-            f.write("| Metric | Value |\n")
-            f.write("|--------|-------|\n")
-            for k, v in latest.items():
-                if k not in ["timestamp", "epoch"] and not isinstance(v, str):
-                    f.write(f"| {k} | {v:.4f} |\n")
+            if not error_files:
+                print("No error analysis JSON files found.")
+                return
+            # Sort by epoch number (assuming format '..._epoch_N.json')
+            try:
+                error_files.sort(
+                    key=lambda f: int(
+                        os.path.splitext(os.path.basename(f))[0].split("_")[-1]
+                    )
+                )
+                error_analysis_file = error_files[-1]
+            except (IndexError, ValueError):
+                print("Could not determine the latest error analysis file.")
+                return
 
-            f.write("\n## Best Metrics\n\n")
-            f.write("| Metric | Best Value | Epoch |\n")
-            f.write("|--------|------------|-------|\n")
-            for k, v in best.items():
-                # Find which epoch had this best value
-                best_epoch = df[df[k] == v]["epoch"].iloc[0]
-                f.write(f"| {k} | {v:.4f} | {best_epoch} |\n")
-
-    def _visualize_error_examples(self):
-        """Visualize error examples from the latest epoch."""
-        if not self.error_examples_history:
+        if not os.path.exists(error_analysis_file):
+            print(f"Error analysis file not found: {error_analysis_file}")
             return
 
-        # Get the latest error examples
-        latest = self.error_examples_history[-1]
-        examples = latest.get("examples", [])
-
-        if not examples:
+        try:
+            with open(error_analysis_file, "r") as f:
+                analysis_data = json.load(f)
+        except json.JSONDecodeError:
+            print(f"Error decoding JSON from {error_analysis_file}")
+            return
+        except Exception as e:
+            print(f"Error reading error analysis file {error_analysis_file}: {e}")
             return
 
-        # Create a visualization of common error patterns
-        error_types = {}
+        # --- Extract Error Type Distribution ---
+        # **ASSUMPTION:** Looking for a structure like: analysis_data['error_types'] = {'Error A': 10, 'Error B': 5}
+        # Adjust this section based on the actual structure of your error_analysis.json
+        error_types_data = analysis_data.get("error_types")
+        if not isinstance(error_types_data, dict) or not error_types_data:
+            # Fallback: Check if structure_slices has counts we can plot
+            structure_errors = analysis_data.get("structure_slices", {})
+            error_types_data = {
+                "Unbalanced Delimiters": structure_errors.get("structure_errors", 0),
+                "Frac Detection Mismatch": structure_errors.get(
+                    "frac_detection_errors", 0
+                ),
+                # Add more based on what `analyze_errors` calculates if needed
+            }
+            # Filter out zero counts
+            error_types_data = {k: v for k, v in error_types_data.items() if v > 0}
 
-        for ex in examples:
-            pred = ex.get("prediction", "")
-            target = ex.get("target", "")
+            if not error_types_data:
+                print(
+                    f"Could not find suitable error type data in {error_analysis_file}"
+                )
+                return
 
-            # Simple error categorization
-            if pred == target:
-                category = "Correct"
-            elif len(pred) == 0:
-                category = "Empty Prediction"
-            elif all(c == pred[0] for c in pred):
-                category = "Repeating Character"
-            elif len(pred) < len(target) / 2:
-                category = "Too Short"
-            elif len(pred) > len(target) * 2:
-                category = "Too Long"
-            else:
-                category = "Other Error"
+        error_labels = list(error_types_data.keys())
+        error_counts = list(error_types_data.values())
 
-            if category not in error_types:
-                error_types[category] = 0
-            error_types[category] += 1
+        # --- Plotting ---
+        fig, ax = plt.subplots(
+            figsize=theme_registry.current_theme.get("figure_size", (10, 6))
+        )
+        theme_registry.style_plot(fig, ax)  # Apply theme
 
-        # Plot error type distribution
-        plt.figure(figsize=(10, 6))
-        bars = plt.bar(error_types.keys(), error_types.values())
-        plt.title(f"Error Type Distribution (Epoch {latest.get('epoch', 0)})")
-        plt.xlabel("Error Type")
-        plt.ylabel("Count")
-        plt.xticks(rotation=45, ha="right")
+        palette = theme_registry.get_palette(len(error_labels))
+        bars = ax.bar(error_labels, error_counts, color=palette)
+
+        ax.set_xlabel("Error Type")
+        ax.set_ylabel("Count")
+        ax.set_title(
+            f"Error Type Distribution ({os.path.basename(error_analysis_file)})"
+        )
+        ax.tick_params(axis="x", rotation=45, ha="right")  # Rotate labels if long
 
         # Add counts on top of bars
         for bar in bars:
-            height = bar.get_height()
-            plt.text(
+            yval = bar.get_height()
+            ax.text(
                 bar.get_x() + bar.get_width() / 2.0,
-                height + 0.1,
-                f"{height:.0f}",
-                ha="center",
+                yval,
+                int(yval),
                 va="bottom",
-            )
+                ha="center",
+            )  # va='bottom' places text above bar
+
+        # Ensure y-axis shows integer counts
+        ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+        ax.set_ylim(bottom=0)  # Start y-axis at 0
 
         plt.tight_layout()
-        plt.savefig(
-            os.path.join(
-                self.log_dir,
-                "plots",
-                f"error_analysis_epoch_{latest.get('epoch', 0)}.png",
-            ),
-            dpi=100,
-            bbox_inches="tight",
-        )
-        plt.close()
+        save_path = os.path.join(self.plot_dir, "error_analysis_latest.png")
+        plt.savefig(save_path, dpi=theme_registry.current_theme.get("dpi", 300))
+        plt.close(fig)
+        print(f"Saved error analysis plot to {save_path}")
 
-        # Save the detailed examples
-        # Convert any NumPy types before serialization
-        examples = convert_numpy_types(examples)
-        with open(
-            os.path.join(
-                self.log_dir, f"error_examples_epoch_{latest.get('epoch', 0)}.json"
-            ),
-            "w",
-        ) as f:
-            json.dump(examples, f, indent=2)
+    def _plot_validation_distribution(self, ned_scores_file: Optional[str] = None):
+        """Plot the distribution of validation NED scores from the latest JSON file."""
+        if ned_scores_file is None:
+            # Find the latest NED scores file if not provided
+            score_files = glob.glob(
+                os.path.join(self.error_analysis_dir, "val_ned_scores_epoch_*.json")
+            )
+            if not score_files:
+                print("No validation NED score JSON files found.")
+                return
+            try:
+                score_files.sort(
+                    key=lambda f: int(
+                        os.path.splitext(os.path.basename(f))[0].split("_")[-1]
+                    )
+                )
+                ned_scores_file = score_files[-1]
+            except (IndexError, ValueError):
+                print("Could not determine the latest NED scores file.")
+                return
+
+        if not os.path.exists(ned_scores_file):
+            print(f"NED scores file not found: {ned_scores_file}")
+            return
+
+        try:
+            with open(ned_scores_file, "r") as f:
+                ned_scores = json.load(f)
+            if not isinstance(ned_scores, list) or not ned_scores:
+                print(f"No valid NED scores found in {ned_scores_file}")
+                return
+        except json.JSONDecodeError:
+            print(f"Error decoding JSON from {ned_scores_file}")
+            return
+        except Exception as e:
+            print(f"Error reading NED scores file {ned_scores_file}: {e}")
+            return
+
+        # --- Plotting Histogram ---
+        fig, ax = plt.subplots(
+            figsize=theme_registry.current_theme.get("figure_size", (10, 6))
+        )
+        theme_registry.style_plot(fig, ax)
+
+        palette = theme_registry.get_palette(1, palette_type="sequential")
+        # Use seaborn's histplot for better automatic binning
+        sns.histplot(ned_scores, bins="auto", kde=True, ax=ax, color=palette[0])
+
+        ax.set_xlabel("Normalized Edit Distance (NED)")
+        ax.set_ylabel("Frequency")
+        ax.set_title(
+            f"Validation NED Distribution ({os.path.basename(ned_scores_file)})"
+        )
+        ax.grid(True, linestyle="--", alpha=0.6)
+        # Set x-axis limits (optional, adjust as needed)
+        ax.set_xlim(
+            left=0, right=max(1.0, np.max(ned_scores) * 1.05) if ned_scores else 1.0
+        )
+
+        plt.tight_layout()
+        save_path = os.path.join(self.plot_dir, "validation_ned_distribution.png")
+        plt.savefig(save_path, dpi=theme_registry.current_theme.get("dpi", 300))
+        plt.close(fig)
+        print(f"Saved validation NED distribution plot to {save_path}")
 
 
 def extract_from_wandb(wandb_dir: str, output_dir: str = "outputs/training_metrics"):
@@ -456,210 +570,65 @@ def watch_training(metrics_file: str, refresh_rate: int = 300):
 def capture_training_metrics(
     metrics: Dict,
     error_examples: Optional[List[Dict]] = None,
+    error_analysis_data: Optional[Dict] = None,
+    val_ned_scores_path: Optional[str] = None,
     output_dir: str = "outputs/training_metrics",
 ):
     """
-    Utility function to call from training script to log metrics during training.
+    Logs training metrics and optionally saves and plots error analysis/distributions.
 
     Args:
-        metrics: Dictionary of metrics
-        error_examples: List of error examples
-        output_dir: Directory to save metrics
+        metrics: Dictionary of metrics from the current epoch/step.
+        error_examples: Optional list of dictionaries containing error examples.
+        error_analysis_data: Optional dictionary containing results from analyze_errors.
+        val_ned_scores_path: Optional path to the saved validation NED scores JSON file.
+        output_dir: The base directory for saving metrics and plots.
     """
-    monitor = TrainingMonitor(output_dir)
-    monitor.log_metrics(metrics, error_examples)
+    monitor = TrainingMonitor(log_dir=output_dir)
 
-
-def create_dashboard():
-    """
-    Create a Streamlit dashboard script for interactive monitoring.
-    """
-    dashboard_code = """
-import os
-import sys
-import json
-from datetime import datetime
-
-import streamlit as st
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
-import altair as alt
-import typer
-
-# Create Typer app
-app = typer.Typer(help="HMER-Ink Training Dashboard")
-
-@app.callback()
-def main(
-    metrics_dir: str = typer.Option(
-        "outputs/training_metrics",
-        "--metrics-dir",
-        "-d",
-        help="Directory containing training metrics",
-    ),
-):
-    \"\"\"Dashboard for monitoring HMER-Ink training.\"\"\"
-    # We only use this for argument parsing
-    # All dashboard logic is in run_dashboard
-    pass
-
-def run_dashboard(metrics_dir: str = "outputs/training_metrics"):
-    \"\"\"Run the dashboard with the given metrics directory.\"\"\"
-    # Set page config
-    st.set_page_config(
-        page_title="HMER-Ink Training Monitor",
-        page_icon="📈",
-        layout="wide",
-        initial_sidebar_state="expanded",
-    )
-
-    # Title and sidebar
-    st.title("HMER-Ink Training Monitor")
-    st.sidebar.title("Controls")
-
-    # Function to load metrics
-    @st.cache_data(ttl=60)  # Cache for 60 seconds
-    def load_metrics(metrics_file):
+    error_analysis_file = None
+    if error_analysis_data is not None:
+        epoch = metrics.get("epoch", "unknown")
+        error_analysis_path = os.path.join(
+            output_dir, f"error_analysis_epoch_{epoch}.json"
+        )
         try:
-            with open(metrics_file, "r") as f:
-                data = json.load(f)
-            return pd.DataFrame(data)
+            error_analysis_data = convert_numpy_types(error_analysis_data)
+            with open(error_analysis_path, "w") as f:
+                json.dump(error_analysis_data, f, indent=2)
+            print(f"Saved error analysis data to {error_analysis_path}")
+            error_analysis_file = error_analysis_path
         except Exception as e:
-            st.error(f"Error loading metrics: {e}")
-            return pd.DataFrame()
+            print(f"Error saving error analysis data: {e}")
 
-    # Path to metrics file
-    metrics_file = os.path.join(metrics_dir, "training_metrics.json")
-    metrics_exist = os.path.exists(metrics_file)
-
-    # Sidebar auto-refresh
-    auto_refresh = st.sidebar.checkbox("Auto-refresh", value=True)
-    refresh_interval = st.sidebar.slider("Refresh interval (seconds)", 5, 300, 60)
-
-    if auto_refresh:
-        st.sidebar.write(f"Dashboard will refresh every {refresh_interval} seconds")
-        st.empty()  # Placeholder for refresh
-
-    # Load metrics
-    if metrics_exist:
-        df = load_metrics(metrics_file)
-        
-        if len(df) > 0:
-            # Extract latest metrics
-            latest = df.iloc[-1]
-            
-            # Create multicolumn layout
-            col1, col2, col3 = st.columns(3)
-            
-            # Display latest metrics
-            with col1:
-                st.subheader("Latest Metrics")
-                st.metric("Epoch", int(latest.get("epoch", 0)))
-                st.metric("Training Loss", f"{latest.get('train_loss', 0):.4f}")
-                
-            with col2:
-                st.subheader("Validation Metrics")
-                for k, v in latest.items():
-                    if k.startswith("val_") and k != "val_loss" and isinstance(v, (int, float)):
-                        st.metric(k.replace("val_", "").replace("_", " ").title(), f"{v:.4f}")
-                
-            with col3:
-                st.subheader("Training Stats")
-                st.metric("Validation Loss", f"{latest.get('val_loss', 0):.4f}")
-                st.metric("Samples Processed", int(latest.get("val_num_samples", 0)))
-            
-            # Plot training curves
-            st.subheader("Training Progress")
-            
-            # Create interactive chart with Altair
-            chart_data = df.reset_index()
-            
-            # Identify numeric columns for plotting
-            numeric_cols = chart_data.select_dtypes(include=[np.number]).columns.tolist()
-            
-            # Metrics selection
-            selected_metrics = st.multiselect(
-                "Select metrics to display",
-                options=[col for col in numeric_cols if col != "index" and col != "epoch"],
-                default=["train_loss", "val_loss"] if "train_loss" in numeric_cols and "val_loss" in numeric_cols else [],
-            )
-            
-            if selected_metrics:
-                # Prepare data for Altair
-                plot_data = pd.melt(
-                    chart_data, 
-                    id_vars=["epoch"],
-                    value_vars=selected_metrics,
-                    var_name="Metric",
-                    value_name="Value"
-                )
-                
-                # Create line chart
-                chart = alt.Chart(plot_data).mark_line(point=True).encode(
-                    x=alt.X("epoch:Q", title="Epoch"),
-                    y=alt.Y("Value:Q", title="Value"),
-                    color=alt.Color("Metric:N", title="Metric"),
-                    tooltip=["epoch", "Metric", "Value"]
-                ).interactive()
-                
-                st.altair_chart(chart, use_container_width=True)
-                
-            # Show error examples if available
-            error_examples_files = [f for f in os.listdir(metrics_dir) if f.startswith("error_examples_epoch_") and f.endswith(".json")]
-            
-            if error_examples_files:
-                st.subheader("Error Examples")
-                
-                # Sort by epoch and get the latest
-                error_examples_files.sort(key=lambda f: int(f.split("_")[-1].split(".")[0]), reverse=True)
-                latest_error_file = error_examples_files[0]
-                
-                try:
-                    with open(os.path.join(metrics_dir, latest_error_file), "r") as f:
-                        error_examples = json.load(f)
-                    
-                    if error_examples:
-                        for i, example in enumerate(error_examples[:5]):  # Show up to 5 examples
-                            with st.expander(f"Example {i+1} - CER: {example.get('cer', 'N/A')}"):
-                                st.code(f"Target:     {example.get('target', '')}")
-                                st.code(f"Prediction: {example.get('prediction', '')}")
-                except Exception as e:
-                    st.warning(f"Error loading error examples: {e}")
-            
-            # Raw data view
-            with st.expander("View Raw Data"):
-                st.dataframe(df)
-        else:
-            st.warning("No metrics data available yet.")
-    else:
-        st.warning(f"No metrics file found at {metrics_file}. Start training to generate metrics.")
-
-    # Auto-refresh script
-    if auto_refresh:
-        st.markdown(f"<meta http-equiv='refresh' content='{refresh_interval}'>", unsafe_allow_html=True)
-        st.sidebar.write(f"Last refreshed: {datetime.now().strftime('%H:%M:%S')}")
-
-# This runs when directly executed
-if __name__ == "__main__":
-    typer.run(run_dashboard)
-"""
-
-    # Write the dashboard script
-    dashboard_path = os.path.join("scripts", "dashboard.py")
-    os.makedirs(os.path.dirname(dashboard_path), exist_ok=True)
-
-    with open(dashboard_path, "w") as f:
-        f.write(dashboard_code)
-
-    return dashboard_path
-
-
-if __name__ == "__main__":
-    # This script is now meant to be used through the CLI interface
-    # See cli.py for the command-line interface
-    print(
-        "This script is now integrated with the CLI. Use 'python cli.py monitor' instead."
+    # Log metrics and trigger dashboard update, passing all paths
+    monitor.log_metrics(
+        metrics, error_examples, error_analysis_file, val_ned_scores_path
     )
-    print("For help, run: python cli.py monitor --help")
+
+
+def create_dashboard(log_dir: str = "outputs/training_metrics"):
+    """Generates the dashboard from existing metrics data."""
+    monitor = TrainingMonitor(log_dir=log_dir)
+    # generate_dashboard will find the latest files automatically if paths are None
+    monitor.generate_dashboard(error_analysis_file=None, val_ned_scores_path=None)
+
+
+if __name__ == "__main__":
+    # Example usage: Generate dashboard from existing logs
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Generate Training Dashboard")
+    parser.add_argument(
+        "--log-dir",
+        type=str,
+        default="outputs/hmer-ink-v1/metrics",  # Example path
+        help="Directory containing training_metrics.json",
+    )
+    args = parser.parse_args()
+
+    if not os.path.exists(os.path.join(args.log_dir, "training_metrics.json")):
+        print(f"Error: Metrics file not found in {args.log_dir}")
+    else:
+        create_dashboard(log_dir=args.log_dir)
+        print(f"Dashboard generated in {os.path.join(args.log_dir, 'plots')}")
