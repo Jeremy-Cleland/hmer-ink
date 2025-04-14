@@ -1,6 +1,6 @@
 # Makefile for HMER-Ink project
 
-.PHONY: clean-pyc clean-outputs clean-all fast-clean lint lint-fix format typecheck check-all train train-fast evaluate test visualize-training watch-training dashboard expand-model train-expanded
+.PHONY: clean-pyc clean-outputs clean-all fast-clean lint lint-fix format typecheck check-all train train-fast evaluate test visualize-training watch-training dashboard expand-model train-expanded visualize visualize-normalization visualize-augmentations visualize-batch
 
 clean-pyc:
 	find . -name '*.pyc' -exec rm -f {} +
@@ -143,18 +143,108 @@ predict:
 	python cli.py predict --model $(MODEL) --input $(INPUT) $$VIZ_FLAG
 
 # Visualize an InkML file
-# Usage: make visualize INPUT=path/to/file.inkml [OUTPUT=path/to/output.pdf]
+# Usage: make visualize INPUT=path/to/file.inkml [OUTPUT=path/to/output.pdf] [SHOW=true]
 visualize:
 	@if [ -z "$(INPUT)" ]; then \
 		echo "Error: INPUT parameter is required"; \
-		echo "Usage: make visualize INPUT=path/to/file.inkml [OUTPUT=path/to/output.pdf]"; \
+		echo "Usage: make visualize INPUT=path/to/file.inkml [OUTPUT=path/to/output.pdf] [SHOW=true]"; \
 		exit 1; \
 	fi; \
 	OUTPUT_FLAG=""; \
 	if [ -n "$(OUTPUT)" ]; then \
 		OUTPUT_FLAG="--output $(OUTPUT)"; \
 	fi; \
-	python cli.py visualize --input $(INPUT) $$OUTPUT_FLAG
+	SHOW_FLAG=""; \
+	if [ "$(SHOW)" = "true" ]; then \
+		SHOW_FLAG="--show"; \
+	fi; \
+	python cli.py visualize --input $(INPUT) $$OUTPUT_FLAG $$SHOW_FLAG
+
+# Visualize the normalization process for an InkML file
+# Usage: make visualize-normalization INPUT=path/to/file.inkml [OUTPUT=path/to/output.pdf] [SHOW=true]
+visualize-normalization:
+	@if [ -z "$(INPUT)" ]; then \
+		echo "Error: INPUT parameter is required"; \
+		echo "Usage: make visualize-normalization INPUT=path/to/file.inkml [OUTPUT=path/to/output.pdf] [SHOW=true]"; \
+		exit 1; \
+	fi; \
+	OUTPUT_FLAG=""; \
+	if [ -n "$(OUTPUT)" ]; then \
+		OUTPUT_FLAG="--output $(OUTPUT)"; \
+	fi; \
+	SHOW_FLAG=""; \
+	if [ "$(SHOW)" = "true" ]; then \
+		SHOW_FLAG="--show"; \
+	fi; \
+	python cli.py visualize-normalization --input $(INPUT) $$OUTPUT_FLAG $$SHOW_FLAG
+
+# Visualize data augmentation effects on an InkML file
+# Usage: make visualize-augmentations INPUT=path/to/file.inkml [OUTPUT=path/to/output.pdf] [SHOW=true] [SEED=42]
+visualize-augmentations:
+	@if [ -z "$(INPUT)" ]; then \
+		echo "Error: INPUT parameter is required"; \
+		echo "Usage: make visualize-augmentations INPUT=path/to/file.inkml [OUTPUT=path/to/output.pdf] [SHOW=true] [SEED=42]"; \
+		exit 1; \
+	fi; \
+	OUTPUT_FLAG=""; \
+	if [ -n "$(OUTPUT)" ]; then \
+		OUTPUT_FLAG="--output $(OUTPUT)"; \
+	fi; \
+	SHOW_FLAG=""; \
+	if [ "$(SHOW)" = "true" ]; then \
+		SHOW_FLAG="--show"; \
+	fi; \
+	SEED_FLAG=""; \
+	if [ -n "$(SEED)" ]; then \
+		SEED_FLAG="--seed $(SEED)"; \
+	fi; \
+	python cli.py visualize-augmentations --input $(INPUT) $$OUTPUT_FLAG $$SHOW_FLAG $$SEED_FLAG
+
+# Batch generate visualizations for multiple randomly-selected samples
+# Usage: make visualize-batch [DATA_DIR=data] [OUTPUT_DIR=outputs/visualizations] [SPLIT=test] [NUM_SAMPLES=5] [SEED=42] [BASIC=true/false] [NORMALIZATION=true/false] [AUGMENTATION=true/false]
+visualize-batch:
+	@DATA_DIR="data"; \
+	if [ -n "$(DATA_DIR)" ]; then \
+		DATA_DIR=$(DATA_DIR); \
+	fi; \
+	OUTPUT_DIR="outputs/visualizations"; \
+	if [ -n "$(OUTPUT_DIR)" ]; then \
+		OUTPUT_DIR=$(OUTPUT_DIR); \
+	fi; \
+	SPLIT="test"; \
+	if [ -n "$(SPLIT)" ]; then \
+		SPLIT=$(SPLIT); \
+	fi; \
+	NUM_SAMPLES=5; \
+	if [ -n "$(NUM_SAMPLES)" ]; then \
+		NUM_SAMPLES=$(NUM_SAMPLES); \
+	fi; \
+	SEED_FLAG=""; \
+	if [ -n "$(SEED)" ]; then \
+		SEED_FLAG="--seed $(SEED)"; \
+	fi; \
+	BASIC_FLAG="--basic"; \
+	if [ "$(BASIC)" = "false" ]; then \
+		BASIC_FLAG="--no-basic"; \
+	fi; \
+	NORMALIZATION_FLAG="--normalization"; \
+	if [ "$(NORMALIZATION)" = "false" ]; then \
+		NORMALIZATION_FLAG="--no-normalization"; \
+	fi; \
+	AUGMENTATION_FLAG="--augmentation"; \
+	if [ "$(AUGMENTATION)" = "false" ]; then \
+		AUGMENTATION_FLAG="--no-augmentation"; \
+	fi; \
+	echo "Batch generating visualizations for $$NUM_SAMPLES samples from $$SPLIT split"; \
+	python cli.py visualize-batch \
+		--data-dir $$DATA_DIR \
+		--output-dir $$OUTPUT_DIR \
+		--split $$SPLIT \
+		--num-samples $$NUM_SAMPLES \
+		$$SEED_FLAG \
+		$$BASIC_FLAG \
+		$$NORMALIZATION_FLAG \
+		$$AUGMENTATION_FLAG
 
 # Run hyperparameter optimization with Weights & Biases
 # Usage: make hpo [EXPERIMENT=name] [RUNS=10]

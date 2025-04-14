@@ -72,12 +72,16 @@ class RandomScale:
 class RandomRotation:
     """Randomly rotate the ink data."""
 
-    def __init__(self, angle_range: Tuple[float, float] = (-15, 15)):
+    def __init__(self, angle_range: Tuple[float, float] = (-15, 15), 
+                 max_probability: float = 0.8):
         """
         Args:
             angle_range: Range of rotation angles in degrees (min, max)
+            max_probability: Maximum probability of applying the rotation
+                            (introduces some unrotated samples)
         """
         self.angle_range = angle_range
+        self.max_probability = max_probability
 
     def __call__(self, data: np.ndarray) -> np.ndarray:
         """
@@ -92,9 +96,18 @@ class RandomRotation:
         """
         if len(data) == 0:
             return data
+            
+        # Sometimes skip rotation entirely - especially useful for complex expressions
+        if np.random.random() > self.max_probability:
+            return data.copy()
 
-        # Generate random angle in degrees
-        angle = np.random.uniform(self.angle_range[0], self.angle_range[1])
+        # Generate random angle in degrees - use smaller rotations for bigger samples
+        # (Complex expressions with many points typically need gentler rotations)
+        point_count_factor = min(1.0, 100 / max(len(data), 1))  # Scale down for larger samples
+        effective_min = self.angle_range[0] * point_count_factor
+        effective_max = self.angle_range[1] * point_count_factor
+        
+        angle = np.random.uniform(effective_min, effective_max)
 
         # Convert to radians
         theta = np.radians(angle)
@@ -196,14 +209,17 @@ class RandomTranslation:
 class RandomStrokeDropout:
     """Randomly drop strokes for augmentation."""
 
-    def __init__(self, dropout_prob: float = 0.05, pen_up_value: float = 1.0):
+    def __init__(self, dropout_prob: float = 0.05, pen_up_value: float = 1.0,
+                 max_dropout_ratio: float = 0.2):
         """
         Args:
             dropout_prob: Probability of dropping a stroke
             pen_up_value: Value indicating pen up in the data
+            max_dropout_ratio: Maximum ratio of strokes that can be dropped (safety measure)
         """
         self.dropout_prob = dropout_prob
         self.pen_up_value = pen_up_value
+        self.max_dropout_ratio = max_dropout_ratio
 
     def __call__(self, data: np.ndarray) -> np.ndarray:
         """
@@ -218,6 +234,29 @@ class RandomStrokeDropout:
         if len(data) == 0 or data.shape[1] < 3:  # Need at least pen state
             return data
 
+        # Count strokes to determine max number that can be dropped
+        stroke_count = 0
+        for i, point in enumerate(data):
+            # Check if this is the end of a stroke
+            pen_up = False
+            if data.shape[1] >= 4:  # Relative coordinates with pen state
+                pen_up = point[-1] >= self.pen_up_value / 2
+                
+            if pen_up or i == len(data) - 1:
+                stroke_count += 1
+                
+        # For very few strokes, don't drop any
+        if stroke_count <= 3:
+            return data.copy()
+            
+        # Adapt dropout probability based on stroke count
+        # Fewer strokes → lower dropout probability
+        adjusted_prob = min(self.dropout_prob, self.dropout_prob * (stroke_count / 10.0))
+            
+        # Calculate maximum strokes to drop (as a safety check)
+        max_strokes_to_drop = int(stroke_count * self.max_dropout_ratio)
+        strokes_dropped = 0
+        
         result = []
         stroke = []
         drop_current = False
@@ -232,15 +271,22 @@ class RandomStrokeDropout:
                 pen_up = point[-1] >= self.pen_up_value / 2
 
             if pen_up or i == len(data) - 1:
+                should_drop = drop_current or (
+                    np.random.random() < adjusted_prob and 
+                    strokes_dropped < max_strokes_to_drop
+                )
+                
                 # Decide whether to drop this stroke
-                if not drop_current and np.random.random() > self.dropout_prob:
+                if not should_drop:
                     result.extend(stroke)
+                else:
+                    strokes_dropped += 1
 
                 stroke = []
-                drop_current = np.random.random() < self.dropout_prob
+                drop_current = np.random.random() < adjusted_prob
 
-        # Handle case where no strokes remain
-        if not result:
+        # Handle case where no strokes remain or too many are dropped
+        if not result or strokes_dropped >= stroke_count:
             return data  # Return original data if all strokes would be dropped
 
         return np.array(result)
@@ -249,12 +295,14 @@ class RandomStrokeDropout:
 class RandomJitter:
     """Add random jitter to ink data."""
 
-    def __init__(self, jitter_scale: float = 0.01):
+    def __init__(self, jitter_scale: float = 0.01, max_probability: float = 0.9):
         """
         Args:
             jitter_scale: Scale of the random jitter to add
+            max_probability: Maximum probability of applying jitter to each point
         """
         self.jitter_scale = jitter_scale
+        self.max_probability = max_probability
 
     def __call__(self, data: np.ndarray) -> np.ndarray:
         """
@@ -270,6 +318,15 @@ class RandomJitter:
         if len(data) == 0:
             return data
 
+        # For complex expressions, use even more conservative jitter
+        point_count = len(data)
+        # Scale down jitter for larger expressions (more points)
+        scaling_factor = min(1.0, 100 / max(point_count, 1))
+        effective_jitter = self.jitter_scale * scaling_factor
+        
+        # Apply jitter only to some points (not all) to maintain structure better
+        jitter_mask = np.random.random(point_count) < self.max_probability
+        
         result = data.copy()
 
         # Add jitter to x and y coordinates
@@ -278,15 +335,17 @@ class RandomJitter:
             x_range = data[:, 0].max() - data[:, 0].min()
             y_range = data[:, 1].max() - data[:, 1].min()
 
+            # Generate jitter for all points, but only apply to selected ones
             jitter_x = np.random.normal(
-                0, self.jitter_scale * x_range, size=data.shape[0]
+                0, effective_jitter * x_range, size=data.shape[0]
             )
             jitter_y = np.random.normal(
-                0, self.jitter_scale * y_range, size=data.shape[0]
+                0, effective_jitter * y_range, size=data.shape[0]
             )
 
-            result[:, 0] += jitter_x
-            result[:, 1] += jitter_y
+            # Apply jitter only to selected points using the mask
+            result[:, 0] += jitter_x * jitter_mask
+            result[:, 1] += jitter_y * jitter_mask
 
         return result
 
@@ -399,25 +458,34 @@ def get_train_transforms(config: Dict) -> Callable:
 
     transforms = []
 
-    # Add random scaling
-    scale_range = aug_config.get("scale_range", (0.8, 1.2))
+    # Add random scaling (more conservative range)
+    scale_range = aug_config.get("scale_range", (0.9, 1.1))
     transforms.append(RandomScale(scale_range))
 
-    # Add random rotation
-    rotation_range = aug_config.get("rotation_range", (-15, 15))
-    transforms.append(RandomRotation(rotation_range))
+    # Add random rotation (reduced angle range with adaptive behavior)
+    rotation_range = aug_config.get("rotation_range", (-10, 10))
+    rotation_prob = aug_config.get("rotation_probability", 0.7)
+    transforms.append(RandomRotation(rotation_range, max_probability=rotation_prob))
 
-    # Add random translation
-    translation_range = aug_config.get("translation_range", (-0.1, 0.1))
+    # Add random translation (smaller shifts)
+    translation_range = aug_config.get("translation_range", (-0.05, 0.05))
     transforms.append(RandomTranslation(translation_range))
 
-    # Add random stroke dropout
-    dropout_prob = aug_config.get("stroke_dropout_prob", 0.05)
-    transforms.append(RandomStrokeDropout(dropout_prob))
+    # Add random stroke dropout (lower probability with safety checks)
+    dropout_prob = aug_config.get("stroke_dropout_prob", 0.03)
+    max_dropout_ratio = aug_config.get("max_dropout_ratio", 0.2)
+    transforms.append(RandomStrokeDropout(
+        dropout_prob, 
+        max_dropout_ratio=max_dropout_ratio
+    ))
 
-    # Add random jitter
-    jitter_scale = aug_config.get("jitter_scale", 0.01)
-    transforms.append(RandomJitter(jitter_scale))
+    # Add random jitter (smaller noise with adaptive behavior)
+    jitter_scale = aug_config.get("jitter_scale", 0.005)
+    jitter_prob = aug_config.get("jitter_probability", 0.7)
+    transforms.append(RandomJitter(
+        jitter_scale, 
+        max_probability=jitter_prob
+    ))
 
     return Compose(transforms)
 

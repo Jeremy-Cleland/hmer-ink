@@ -84,6 +84,7 @@ class InkmlParser:
         x_range: Tuple[float, float] = (-1, 1),
         y_range: Tuple[float, float] = (-1, 1),
         time_range: Optional[Tuple[float, float]] = None,
+        preserve_aspect_ratio: bool = True,
     ) -> List[np.ndarray]:
         """
         Normalize stroke coordinates to specified ranges.
@@ -93,6 +94,7 @@ class InkmlParser:
             x_range: Target range for x coordinates
             y_range: Target range for y coordinates
             time_range: Target range for time values (if None, keep original)
+            preserve_aspect_ratio: Whether to preserve the aspect ratio of the original strokes
 
         Returns:
             List of normalized strokes
@@ -111,21 +113,69 @@ class InkmlParser:
         x_scale = (x_max - x_min) if x_max > x_min else 1.0
         y_scale = (y_max - y_min) if y_max > y_min else 1.0
 
+        # Calculate target width and height
+        target_width = x_range[1] - x_range[0]
+        target_height = y_range[1] - y_range[0]
+
+        # If preserving aspect ratio, use the same scale for both dimensions
+        if preserve_aspect_ratio and x_scale > 0 and y_scale > 0:
+            # Calculate original aspect ratio
+            original_aspect_ratio = x_scale / y_scale
+            
+            # Calculate the scaling factor to fit within the target bounds
+            # while preserving aspect ratio
+            if original_aspect_ratio > 1:  # wider than tall
+                # Scale based on width, adjust height
+                scale_factor = target_width / x_scale
+                effective_height = y_scale * scale_factor
+                # Center within the target height
+                y_offset = (target_height - effective_height) / 2
+            else:  # taller than wide or square
+                # Scale based on height, adjust width
+                scale_factor = target_height / y_scale
+                effective_width = x_scale * scale_factor
+                # Center within the target width
+                x_offset = (target_width - effective_width) / 2
+        else:
+            # If not preserving aspect ratio, use different scales for each dimension
+            scale_factor_x = target_width / x_scale if x_scale > 0 else 1.0
+            scale_factor_y = target_height / y_scale if y_scale > 0 else 1.0
+            x_offset = 0
+            y_offset = 0
+
         normalized_strokes = []
         for stroke in strokes:
             normalized_stroke = stroke.copy()
 
-            # Normalize x coordinates
-            normalized_stroke[:, 0] = (stroke[:, 0] - x_min) / x_scale
-            normalized_stroke[:, 0] = (
-                normalized_stroke[:, 0] * (x_range[1] - x_range[0]) + x_range[0]
-            )
+            if preserve_aspect_ratio:
+                # Apply the same scaling factor to both dimensions and center within target range
+                if original_aspect_ratio > 1:  # wider than tall
+                    # Normalize to [0, 1] first
+                    normalized_stroke[:, 0] = (stroke[:, 0] - x_min) / x_scale
+                    normalized_stroke[:, 1] = (stroke[:, 1] - y_min) / y_scale
+                    
+                    # Scale to target size while preserving aspect ratio
+                    normalized_stroke[:, 0] = normalized_stroke[:, 0] * target_width + x_range[0]
+                    normalized_stroke[:, 1] = normalized_stroke[:, 1] * effective_height + y_range[0] + y_offset
+                else:
+                    # Normalize to [0, 1] first
+                    normalized_stroke[:, 0] = (stroke[:, 0] - x_min) / x_scale
+                    normalized_stroke[:, 1] = (stroke[:, 1] - y_min) / y_scale
+                    
+                    # Scale to target size while preserving aspect ratio
+                    normalized_stroke[:, 0] = normalized_stroke[:, 0] * effective_width + x_range[0] + x_offset
+                    normalized_stroke[:, 1] = normalized_stroke[:, 1] * target_height + y_range[0]
+            else:
+                # Standard normalization without preserving aspect ratio
+                normalized_stroke[:, 0] = (stroke[:, 0] - x_min) / x_scale
+                normalized_stroke[:, 0] = (
+                    normalized_stroke[:, 0] * target_width + x_range[0]
+                )
 
-            # Normalize y coordinates
-            normalized_stroke[:, 1] = (stroke[:, 1] - y_min) / y_scale
-            normalized_stroke[:, 1] = (
-                normalized_stroke[:, 1] * (y_range[1] - y_range[0]) + y_range[0]
-            )
+                normalized_stroke[:, 1] = (stroke[:, 1] - y_min) / y_scale
+                normalized_stroke[:, 1] = (
+                    normalized_stroke[:, 1] * target_height + y_range[0]
+                )
 
             # Normalize time if requested
             if time_range and stroke.shape[1] > 2:

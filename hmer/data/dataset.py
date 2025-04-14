@@ -135,6 +135,7 @@ class HMERDataset(Dataset):
                 x_range=self.x_range,
                 y_range=self.y_range,
                 time_range=self.time_range,
+                preserve_aspect_ratio=True,  # Preserve aspect ratio to avoid distortion
             )
 
         # Convert to relative coordinates if requested

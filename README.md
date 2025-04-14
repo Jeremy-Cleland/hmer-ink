@@ -180,11 +180,38 @@ make predict MODEL=outputs/checkpoints/best_model.pt INPUT=data/test/sample.inkm
 ### Visualization
 
 ```bash
-# Visualize an InkML file
+# Basic visualization of an InkML file
 make visualize INPUT=data/test/sample.inkml
 # or with output
 make visualize INPUT=data/test/sample.inkml OUTPUT=visualization.pdf
+# Show the visualization instead of saving to file
+make visualize INPUT=data/test/sample.inkml SHOW=true
+
+# Visualization of the normalization process
+make visualize-normalization INPUT=data/test/sample.inkml OUTPUT=normalization.pdf
+# Custom normalization ranges
+make visualize-normalization INPUT=data/test/sample.inkml OUTPUT=normalization.pdf --x-min=-2.0 --x-max=2.0
+
+# Visualization of data augmentations
+make visualize-augmentations INPUT=data/test/sample.inkml OUTPUT=augmentations.pdf
+# With a specific random seed for reproducible results
+make visualize-augmentations INPUT=data/test/sample.inkml OUTPUT=augmentations.pdf SEED=42
+
+# AUTOMATIC BATCH VISUALIZATION
+# Generate visualizations for 5 random samples from the test set
+make visualize-batch
+# Customize the batch visualization
+make visualize-batch DATA_DIR=data OUTPUT_DIR=outputs/custom_visualizations SPLIT=train NUM_SAMPLES=10 SEED=42
+# Choose which types of visualizations to generate
+make visualize-batch NORMALIZATION=false AUGMENTATION=false  # Only basic visualizations
 ```
+
+These visualization tools help in understanding:
+1. How the original ink strokes look
+2. How normalization affects the data (original → normalized → relative coordinates)
+3. How different augmentations transform the data, with adaptive behavior based on expression complexity
+
+The `visualize-batch` command is particularly useful for exploring the dataset without needing to specify individual file paths. It automatically selects random samples and generates all visualization types.
 
 ### Generating Reports
 
@@ -215,6 +242,25 @@ training:
   num_workers: 4  # Adjust based on CPU cores available
   gradient_accumulation_steps: 8  # Increase for smaller batch sizes
   use_amp: true   # Mixed precision - keep enabled for faster training
+
+# Data processing settings
+data:
+  normalization:
+    x_range: [-1, 1]  # Target range for x coordinates
+    y_range: [-1, 1]  # Target range for y coordinates
+    # Note: Aspect ratio is preserved by default to prevent distortion
+  
+  augmentation:
+    enabled: true
+    scale_range: [0.9, 1.1]       # Gentle scaling to avoid distortion
+    rotation_range: [-10, 10]     # Rotation angles in degrees
+    rotation_probability: 0.7     # Probability of applying rotation
+    translation_range: [-0.05, 0.05]  # Small translations
+    stroke_dropout_prob: 0.03     # Low probability of stroke dropout
+    max_dropout_ratio: 0.2        # Maximum ratio of strokes that can be dropped
+    jitter_scale: 0.005           # Minimal jitter to retain legibility
+    jitter_probability: 0.7       # Probability of applying jitter to each point
+    # Note: All augmentations are adaptive based on expression complexity
   
 # Model size - adjust for memory constraints
 model:
@@ -265,6 +311,33 @@ The system uses an encoder-decoder architecture:
 
 2. **Decoder**: Generates LaTeX code from encoded representations
    - Options: Transformer or LSTM with attention
+
+## How It Works: From Ink Strokes to LaTeX
+
+The model processes handwritten mathematical expressions through several stages:
+
+1. **Data Preprocessing**:
+   - **Parsing**: InkML files containing stroke data (x, y, t coordinates) are parsed
+   - **Normalization**: Coordinates are normalized to a consistent range ([-1, 1]) with aspect ratio preservation
+   - **Relative Encoding**: Absolute coordinates are converted to relative movements (dx, dy)
+   - **Stroke Flattening**: All strokes are combined into a single sequence with pen-up indicators
+
+2. **Encoder Processing**:
+   - The preprocessed ink sequence is embedded into a higher-dimensional space
+   - The encoder (Transformer/BiLSTM/CNN) processes this sequence
+   - Produces a context-aware representation of the handwritten expression
+
+3. **Decoder Generation**:
+   - Starts with a special start token
+   - At each step, attends to the encoded representation
+   - Predicts the next LaTeX token based on previously generated tokens
+   - Uses beam search to explore multiple candidate sequences
+
+4. **Post-processing**:
+   - Converts token IDs back to LaTeX symbols
+   - Assembles the complete LaTeX expression
+
+This approach effectively "translates" from the language of handwritten strokes to the language of LaTeX, similar to how machine translation works between natural languages.
 
 ## Performance Optimization
 
