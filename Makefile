@@ -1,6 +1,6 @@
 # Makefile for HMER-Ink project
 
-.PHONY: clean-pyc clean-outputs clean-all lint lint-fix format typecheck check-all train train-fast evaluate test visualize-training watch-training dashboard
+.PHONY: clean-pyc clean-outputs clean-all lint lint-fix format typecheck check-all train train-fast evaluate test visualize-training watch-training dashboard expand-model train-expanded
 
 clean-pyc:
 	find . -name '*.pyc' -exec rm -f {} +
@@ -211,3 +211,41 @@ dashboard:
 	fi; \
 	echo "Launching training dashboard for $$METRICS_DIR on port $$PORT"; \
 	python cli.py monitor dashboard --metrics-dir $$METRICS_DIR --port $$PORT
+
+# Expand a model from a smaller architecture to a larger one
+# Usage: make expand-model SRC=outputs/experiment_name/checkpoints/best_model.pt [DST=outputs/checkpoints/expanded_model.pt] [CONFIG=configs/fast_expanded.yaml] [DRY_RUN=true]
+expand-model:
+	@if [ -z "$(SRC)" ]; then \
+		echo "Error: SRC parameter is required"; \
+		echo "Usage: make expand-model SRC=path/to/source_model.pt [DST=path/to/expanded_model.pt] [CONFIG=configs/fast_expanded.yaml] [DRY_RUN=true]"; \
+		exit 1; \
+	fi; \
+	if [ -z "$(DST)" ]; then \
+		DST="outputs/checkpoints/expanded_model.pt"; \
+	fi; \
+	if [ -z "$(CONFIG)" ]; then \
+		CONFIG="configs/fast_expanded.yaml"; \
+	fi; \
+	DRY_RUN_FLAG=""; \
+	if [ "$(DRY_RUN)" = "true" ]; then \
+		DRY_RUN_FLAG="--dry-run"; \
+		echo "Previewing model expansion (dry run)..."; \
+	else \
+		echo "Expanding model from $(SRC) to $(DST) using $$CONFIG"; \
+	fi; \
+	python scripts/expand_model.py "$(SRC)" "$(DST)" --config "$$CONFIG" $$DRY_RUN_FLAG
+
+# Train with the expanded model
+# Usage: make train-expanded [CHECKPOINT=outputs/checkpoints/expanded_model.pt] [CONFIG=configs/fast_expanded.yaml] [EXPERIMENT=expanded_model_finetuning]
+train-expanded:
+	@if [ -z "$(CHECKPOINT)" ]; then \
+		CHECKPOINT="outputs/checkpoints/expanded_model.pt"; \
+	fi; \
+	if [ -z "$(CONFIG)" ]; then \
+		CONFIG="configs/fast_expanded.yaml"; \
+	fi; \
+	if [ -z "$(EXPERIMENT)" ]; then \
+		EXPERIMENT="expanded_model_finetuning"; \
+	fi; \
+	echo "Training expanded model from $(CHECKPOINT) using $$CONFIG"; \
+	python cli.py train --config "$$CONFIG" --checkpoint "$(CHECKPOINT)" --experiment "$$EXPERIMENT"
