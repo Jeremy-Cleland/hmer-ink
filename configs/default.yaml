@@ -11,7 +11,7 @@ data:
   max_token_length: 224
   use_synthetic: false
   vocab_random_seed: 42
-  dataloader_seed: 42
+  dataloader_seed: 42 # Fixed seed for DataLoader to ensure consistent batching
   vocab_file: "vocab.json"
   use_shared_vocab: true # Use shared vocabulary for consistent training/resuming
   normalization:

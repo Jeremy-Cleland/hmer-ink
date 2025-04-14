@@ -162,37 +162,41 @@ def get_scheduler(config: Dict[str, Any], optimizer):
             return 1.0
 
         return LambdaLR(optimizer, lr_lambda)
-        
+
     elif scheduler_type == "one_cycle":
         from torch.optim.lr_scheduler import OneCycleLR
-        
+
         max_lr = scheduler_config.get("max_lr", 0.01)
         total_steps = scheduler_config.get("total_steps", None)
         epochs = scheduler_config.get("epochs", 30)
-        
+
         # Get steps_per_epoch from config if available
-        if hasattr(optimizer, 'param_groups') and len(optimizer.param_groups) > 0:
-            lr = optimizer.param_groups[0]['lr']
-            print(f"Initial learning rate: {lr}, Max learning rate for OneCycleLR: {max_lr}")
-        
+        if hasattr(optimizer, "param_groups") and len(optimizer.param_groups) > 0:
+            lr = optimizer.param_groups[0]["lr"]
+            print(
+                f"Initial learning rate: {lr}, Max learning rate for OneCycleLR: {max_lr}"
+            )
+
         # Try to estimate steps per epoch
         steps_per_epoch = scheduler_config.get("steps_per_epoch", 100)
-        
+
         pct_start = scheduler_config.get("pct_start", 0.3)
         div_factor = scheduler_config.get("div_factor", 25.0)
         final_div_factor = scheduler_config.get("final_div_factor", 10000.0)
-        
+
         if total_steps is None:
             total_steps = epochs * steps_per_epoch
-            print(f"OneCycleLR configured with total_steps={total_steps} (epochs={epochs} × steps_per_epoch={steps_per_epoch})")
-            
+            print(
+                f"OneCycleLR configured with total_steps={total_steps} (epochs={epochs} × steps_per_epoch={steps_per_epoch})"
+            )
+
         return OneCycleLR(
-            optimizer, 
+            optimizer,
             max_lr=max_lr,
             total_steps=total_steps,
             pct_start=pct_start,
             div_factor=div_factor,
-            final_div_factor=final_div_factor
+            final_div_factor=final_div_factor,
         )
 
     else:

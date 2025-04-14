@@ -41,7 +41,7 @@ check-all: lint format typecheck
 # If the experiment name already exists, a version suffix will be added (-v1, -v2, etc.)
 train:
 	@if [ -z "$(EXPERIMENT)" ]; then \
-		BASE_NAME="hmer-ink-m4-max"; \
+		BASE_NAME="hmer-ink"; \
 	else \
 		BASE_NAME="$(EXPERIMENT)"; \
 	fi; \
