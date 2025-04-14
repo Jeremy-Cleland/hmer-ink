@@ -90,4 +90,6 @@ output:
   tensorboard: false
   save_best_k: 2
   monitor_metric: "expression_recognition_rate"
-  monitor_mode: "max"
+  monitor_mode: "max"  # Higher is better for ERR
+  record_metrics: true  # Automatically save metrics to JSON for monitoring
+  metrics_dir: "outputs/training_metrics"

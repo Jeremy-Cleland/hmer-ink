@@ -42,22 +42,22 @@ check-all: lint format typecheck
 # Train target with experiment naming support
 # Usage: make train [EXPERIMENT=name] [CONFIG=configs/custom.yaml]
 # If no experiment name is provided, "hmer-ink" will be used
-# If the experiment name already exists, a version suffix will be added (_v1, _v2, etc.)
+# If the experiment name already exists, a version suffix will be added (-v1, -v2, etc.)
 train:
 	@if [ -z "$(EXPERIMENT)" ]; then \
 		BASE_NAME="hmer-ink"; \
 	else \
 		BASE_NAME="$(EXPERIMENT)"; \
 	fi; \
-	if [[ "$$BASE_NAME" == *_v* ]]; then \
-		echo "Error: Please provide a base experiment name without version suffix (_v1, _v2, etc.)"; \
+	if [[ "$$BASE_NAME" == *-v* ]]; then \
+		echo "Error: Please provide a base experiment name without version suffix (-v1, -v2, etc.)"; \
 		exit 1; \
 	fi; \
 	VERSION=1; \
-	while [ -d "outputs/registry/$$BASE_NAME_v$$VERSION" ]; do \
+	while [ -d "outputs/$$BASE_NAME-v$$VERSION" ]; do \
 		VERSION=$$((VERSION + 1)); \
 	done; \
-	EXPERIMENT_NAME="$$BASE_NAME_v$$VERSION"; \
+	EXPERIMENT_NAME="$$BASE_NAME-v$$VERSION"; \
 	echo "Starting training for experiment: $$EXPERIMENT_NAME"; \
 	if [ -z "$(CONFIG)" ]; then \
 		CONFIG_PATH="configs/default.yaml"; \
@@ -74,15 +74,15 @@ train-fast:
 	else \
 		BASE_NAME="$(EXPERIMENT)-fast"; \
 	fi; \
-	if [[ "$$BASE_NAME" == *_v* ]]; then \
-		echo "Error: Please provide a base experiment name without version suffix (_v1, _v2, etc.)"; \
+	if [[ "$$BASE_NAME" == *-v* ]]; then \
+		echo "Error: Please provide a base experiment name without version suffix (-v1, -v2, etc.)"; \
 		exit 1; \
 	fi; \
 	VERSION=1; \
-	while [ -d "outputs/registry/$$BASE_NAME_v$$VERSION" ]; do \
+	while [ -d "outputs/$$BASE_NAME-v$$VERSION" ]; do \
 		VERSION=$$((VERSION + 1)); \
 	done; \
-	EXPERIMENT_NAME="$$BASE_NAME_v$$VERSION"; \
+	EXPERIMENT_NAME="$$BASE_NAME-v$$VERSION"; \
 	echo "Starting fast training with optimized settings for experiment: $$EXPERIMENT_NAME"; \
 	python cli.py train --config configs/fasttraining.yaml --output-dir outputs/$$EXPERIMENT_NAME
 
@@ -196,7 +196,7 @@ watch-training:
 		REFRESH=$(REFRESH); \
 	fi; \
 	echo "Watching training metrics in $$METRICS_FILE (refreshing every $$REFRESH seconds)"; \
-	python cli.py monitor watch --metrics-file $$METRICS_FILE --refresh-rate $$REFRESH
+	python cli.py monitor watch --metrics-file $$METRICS_FILE --refresh $$REFRESH
 
 # Launch interactive training dashboard
 # Usage: make dashboard [METRICS_DIR=outputs/training_metrics] [PORT=8501]

@@ -77,7 +77,7 @@ evaluation:
   batch_size: 32
   device: "mps"
   metrics: ["edit_distance", "character_error_rate", "expression_recognition_rate", "symbol_accuracy", "token_error_rate"]
-  beam_size: 4  # Increased for better evaluation
+  beam_size: 3  # Increased for better evaluation
   # Include detailed error examples for better monitoring
   num_error_examples: 10
 
@@ -90,4 +90,6 @@ output:
   tensorboard: false  # Disable tensorboard
   save_best_k: 2  # Save more best models
   monitor_metric: "expression_recognition_rate"
-  monitor_mode: "max"
+  monitor_mode: "max"  # Higher is better for ERR
+  record_metrics: true  # Automatically save metrics to JSON for monitoring
+  metrics_dir: "outputs/training_metrics"

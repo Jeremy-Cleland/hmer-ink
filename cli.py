@@ -37,8 +37,18 @@ def train_command(
     typer.echo(f"Training model with config from {config}")
     if checkpoint:
         typer.echo(f"Resuming from checkpoint {checkpoint}")
+    if output_dir:
+        typer.echo(f"Saving outputs to {output_dir}")
 
-    train(config, checkpoint, output_dir)
+    model = train(config, checkpoint, output_dir)
+    
+    # Print location of metrics file if metrics recording is enabled
+    config_data = train.__globals__["load_config"](config)
+    if config_data["output"].get("record_metrics", False):
+        metrics_dir = config_data["output"].get("metrics_dir", "outputs/training_metrics")
+        metrics_file = os.path.join(metrics_dir, "training_metrics.json")
+        typer.echo(f"Training metrics recorded to {metrics_file}")
+        typer.echo(f"Use 'make watch-training' or 'make dashboard' to view metrics")
 
     typer.echo("Training completed")
 

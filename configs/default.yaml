@@ -71,11 +71,15 @@ evaluation:
 
 # Outputs
 output:
-  checkpoint_dir: "outputs/checkpoints"
-  log_dir: "outputs/logs"
+  model_dir: "outputs/models"  # Base directory for all model files
+  checkpoint_dir: "checkpoints"  # Relative to model_dir
+  log_dir: "logs"  # Relative to model_dir
+  metrics_dir: "metrics"  # Relative to model_dir
+  
   use_wandb: true
   project_name: "hmer-ink"
   tensorboard: true
   save_best_k: 3  # Save the k best models
   monitor_metric: "expression_recognition_rate"  # Metric to monitor for best model
   monitor_mode: "max"  # Higher is better for ERR
+  record_metrics: true  # Automatically save metrics to JSON for monitoring

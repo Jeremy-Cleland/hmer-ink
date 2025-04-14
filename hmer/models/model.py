@@ -200,14 +200,14 @@ class HMERModel(nn.Module):
         # Keep track of finished sequences
         is_finished = torch.zeros(batch_size, dtype=torch.bool, device=device)
 
-        # Storage for final results - always use the provided batch_size for results
-        all_beams = [[] for _ in range(batch_size)]
-        all_scores = [[] for _ in range(batch_size)]
+        # Storage for final results - always use the actual_batch_size for results
+        all_beams = [[] for _ in range(actual_batch_size)]
+        all_scores = [[] for _ in range(actual_batch_size)]
 
         # For beam search with beam_size=2
         if beam_size == 2:
-            beam_sequences = [[] for _ in range(batch_size)]
-            beam_scores = [[] for _ in range(batch_size)]
+            beam_sequences = [[] for _ in range(actual_batch_size)]
+            beam_scores = [[] for _ in range(actual_batch_size)]
 
         # Generate tokens up to max_length
         for step in range(max_length):
@@ -330,12 +330,13 @@ class HMERModel(nn.Module):
                         continue
 
                     # Validate indices are in bounds
-                    if i >= next_tokens.size(0):
+                    if i >= next_tokens.size(0) or i >= actual_batch_size:
                         # Handle out of bounds - just keep current sequence and mark as finished
-                        new_sequences.append(sequences[i : i + 1])
+                        new_sequences.append(sequences[min(i, sequences.size(0)-1) : min(i, sequences.size(0)-1) + 1])
                         is_finished[i] = True
-                        all_beams[i] = [sequences[i].tolist()]
-                        all_scores[i] = [0.0]
+                        if i < actual_batch_size:
+                            all_beams[i] = [sequences[min(i, sequences.size(0)-1)].tolist()]
+                            all_scores[i] = [0.0]
                         continue
 
                     # Get 2 best next tokens for this example
@@ -400,14 +401,18 @@ class HMERModel(nn.Module):
                         )
 
         # Handle any unfinished sequences
-        for i in range(batch_size):
+        for i in range(actual_batch_size):
             if not all_beams[i]:
-                all_beams[i] = [sequences[i].tolist()]
+                if i < sequences.size(0):
+                    all_beams[i] = [sequences[i].tolist()]
+                else:
+                    # Handle case where i is out of bounds
+                    all_beams[i] = [[self.sos_token_id, self.eos_token_id]]
                 all_scores[i] = [0.0]
 
             # For beam_size=2, fill second beam with best alternative
             if beam_size == 2:
-                if len(all_beams[i]) < 2 and beam_sequences[i]:
+                if len(all_beams[i]) < 2 and i < len(beam_sequences) and beam_sequences[i]:
                     # Add the best alternative sequence
                     all_beams[i].append(
                         beam_sequences[i][1]
@@ -421,11 +426,15 @@ class HMERModel(nn.Module):
                     )
 
         # Ensure all examples have exactly beam_size results
-        for i in range(batch_size):
+        for i in range(actual_batch_size):
             # Duplicate the first beam if needed to reach beam_size
-            while len(all_beams[i]) < beam_size:
-                all_beams[i].append(all_beams[i][0])
-                all_scores[i].append(all_scores[i][0])
+            if all_beams[i]:  # Check if there's at least one beam
+                while len(all_beams[i]) < beam_size:
+                    all_beams[i].append(all_beams[i][0])
+                    all_scores[i].append(all_scores[i][0])
+            else:  # Handle empty beam case
+                all_beams[i] = [[self.sos_token_id, self.eos_token_id]] * beam_size
+                all_scores[i] = [0.0] * beam_size
 
         return all_beams, all_scores
 

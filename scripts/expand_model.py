@@ -115,7 +115,10 @@ def expand_model(
     
     # Save the expanded model
     print(f"Saving expanded model to {dst_checkpoint}")
-    os.makedirs(os.path.dirname(dst_checkpoint), exist_ok=True)
+    # Only create directories if there's actually a path to create
+    dst_dir = os.path.dirname(dst_checkpoint)
+    if dst_dir:
+        os.makedirs(dst_dir, exist_ok=True)
     
     # Preserve training state from the original checkpoint
     save_dict = {

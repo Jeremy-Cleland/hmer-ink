@@ -2,7 +2,7 @@
 Evaluation metrics for HMER.
 """
 
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import Levenshtein
 import numpy as np
