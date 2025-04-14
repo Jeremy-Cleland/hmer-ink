@@ -361,7 +361,7 @@ class TrainingMonitor:
         ax.set_title(
             f"Error Type Distribution ({os.path.basename(error_analysis_file)})"
         )
-        ax.tick_params(axis="x", rotation=45, ha="right")  # Rotate labels if long
+        ax.tick_params(axis="x", rotation=45)
 
         # Add counts on top of bars
         for bar in bars:

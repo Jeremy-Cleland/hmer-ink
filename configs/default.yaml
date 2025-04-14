@@ -1,85 +1,111 @@
-# HMER-Ink Optimized Configuration
+# Optimized Training Configuration for HMER-Ink
+# Balanced for reliable convergence with good performance
 
 # Data settings
 data:
   data_dir: "data"
-  train_dirs: ["train", "synthetic", "symbols"]  # Use all available training data
+  train_dirs: ["train", "symbols"] # Both datasets for better symbol recognition
   valid_dir: "valid"
   test_dir: "test"
-  max_seq_length: 512
-  max_token_length: 256  # Increased to handle longer LaTeX expressions
-  use_synthetic: true  # Leverage synthetic data
+  max_seq_length: 384
+  max_token_length: 224
+  use_synthetic: false
+  vocab_random_seed: 42
+  dataloader_seed: 42
+  vocab_file: "vocab.json"
+  use_shared_vocab: true # Use shared vocabulary for consistent training/resuming
   normalization:
-    x_range: [-1, 1]  # Normalize x coordinates to this range
-    y_range: [-1, 1]  # Normalize y coordinates to this range
-    time_range: [0, 1]  # Normalize time to this range
+    x_range: [-1, 1]
+    y_range: [-1, 1]
+    time_range: [0, 1]
   augmentation:
     enabled: true
-    scale_range: [0.7, 1.3]  # More aggressive scaling
-    rotation_range: [-20, 20]  # Wider rotation range for better robustness
-    translation_range: [-0.15, 0.15]  # Increased translation range
-    stroke_dropout_prob: 0.05
-    jitter_scale: 0.01  # Add small jitter for noise robustness
-    stroke_thickness_range: [1.0, 2.5]
+    scale_range: [0.85, 1.15] # Conservative scaling in early training
+    rotation_range: [-8, 8] # Minimal rotation to start with
+    translation_range: [-0.08, 0.08]
+    stroke_dropout_prob: 0.03
+    jitter_scale: 0.008
+    stroke_thickness_range: [1.0, 2.0]
 
-# Model architecture
+# Model architecture - optimal for math expression recognition
 model:
   name: "transformer_encoder_decoder"
   encoder:
-    type: "transformer"  # Options: transformer, bilstm, cnn
-    input_dim: 4  # x, y, t, pen_state
-    embedding_dim: 384  # Increased dimension for better representation
-    num_layers: 6  # Deeper encoder
+    type: "transformer"
+    input_dim: 4 # x, y, t, pen_state
+    embedding_dim: 320 # Keep capacity for math symbol relationships
+    num_layers: 4
     num_heads: 8
-    dropout: 0.2  # Increased dropout for better generalization
+    dropout: 0.1 # Lower dropout for better training signal
     position_encoding: "sinusoidal"
   decoder:
-    type: "transformer"  # Options: transformer, lstm
-    embedding_dim: 384
-    num_layers: 6  # Deeper decoder
+    type: "transformer"
+    embedding_dim: 320
+    num_layers: 4
     num_heads: 8
-    dropout: 0.2
-    max_length: 256
+    dropout: 0.1
+    max_length: 224
 
-# Training settings
+# Training settings - optimized for reliable convergence
 training:
-  batch_size: 16  # Smaller batch size for MPS memory efficiency
-  learning_rate: 0.0003  # Slightly lower learning rate for stability
-  weight_decay: 0.0001
-  num_epochs: 100  # Train for longer
-  early_stopping_patience: 10  # More patience
+  batch_size: 64 # Larger batch size performed better in Model 2
+  learning_rate: 0.0001 # Start with lower LR
+  weight_decay: 0.00007
+  num_epochs: 100
+  early_stopping_patience: 15
   lr_scheduler:
-    type: "reduce_on_plateau"
-    factor: 0.5
-    patience: 3
-    threshold: 0.001
-  optimizer: "adamw"  # Better weight decay handling
-  use_amp: true  # Mixed precision for faster training
-  device: "mps"  # For Apple Silicon
-  num_workers: 2
-  gradient_accumulation_steps: 8  # Increased for larger effective batch size
-  save_every_n_epochs: 1
-  validate_every_n_steps: 2000  # Reduced validation frequency for faster training
-  clip_grad_norm: 1.0  # Add gradient clipping for stability
+    type: "one_cycle" # Use one cycle for better convergence
+    max_lr: 0.0006 # Peak learning rate
+    pct_start: 0.2 # Reach peak LR after 20% of training
+    div_factor: 6.0 # Initial LR = max_lr/div_factor
+    final_div_factor: 10.0 # Final LR = initial_lr/final_div_factor
+  optimizer: "adamw"
+  use_amp: true
+  device: "mps"
+  num_workers: 4
+  gradient_accumulation_steps: 6
+  save_every_n_epochs: 2
+  validate_every_n_steps: 1000
+  clip_grad_norm: 1.0
+  label_smoothing: 0.1 # Add label smoothing for regularization
+
+# MPS specific optimizations
+mps_configuration:
+  enable_mps_fallback: true
+  verbose: false
+  high_watermark_ratio: 0.0
+  prefer_channels_last: true
+  enable_early_graph_capture: true
+  separate_device_alloc: true
+  use_system_allocator: true
 
 # Evaluation settings
 evaluation:
-  batch_size: 16
-  device: "mps"  # Explicitly use MPS for evaluation
-  metrics: ["edit_distance", "normalized_edit_distance", "exact_match", "expression_recognition_rate", "symbol_accuracy"]
-  beam_size: 5  # Increased beam size for better results
+  batch_size: 32
+  device: "mps"
+  metrics:
+    [
+      "edit_distance",
+      "normalized_edit_distance",
+      "exact_match",
+      "expression_recognition_rate",
+      "symbol_accuracy",
+    ]
+  beam_size: 3 # Moderate beam size for better predictions
+  val_max_samples: 100 # More validation samples
+  error_analysis_batches: 2
 
 # Outputs
 output:
-  model_dir: "outputs/models"  # Base directory for all model files
-  checkpoint_dir: "checkpoints"  # Relative to model_dir
-  log_dir: "logs"  # Relative to model_dir
-  metrics_dir: "metrics"  # Relative to model_dir
-  
+  model_dir: "outputs/models"
+  checkpoint_dir: "checkpoints"
+  log_dir: "logs"
+  metrics_dir: "metrics"
+
   use_wandb: true
-  project_name: "hmer-ink"
-  tensorboard: true
-  save_best_k: 3  # Save the k best models
-  monitor_metric: "expression_recognition_rate"  # Metric to monitor for best model
-  monitor_mode: "max"  # Higher is better for ERR
-  record_metrics: true  # Automatically save metrics to JSON for monitoring
+  project_name: "hmer-ink-m4-max"
+  tensorboard: false
+  save_best_k: 3
+  monitor_metric: "val_loss" # Monitor validation loss for early stopping
+  monitor_mode: "min"
+  record_metrics: true

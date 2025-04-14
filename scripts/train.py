@@ -34,6 +34,7 @@ def train_epoch(
     criterion: nn.Module,
     device: torch.device,
     epoch: int,
+    scheduler=None,
     use_amp: bool = False,
     grad_accum_steps: int = 1,
     clip_grad_norm: float = 0.0,
@@ -158,6 +159,13 @@ def train_epoch(
                 scaler.update()
             else:
                 optimizer.step()
+                
+            # Step scheduler if it's one that needs per-batch updates
+            if scheduler is not None and (
+                isinstance(scheduler, torch.optim.lr_scheduler.OneCycleLR) or
+                isinstance(scheduler, torch.optim.lr_scheduler.LambdaLR)
+            ):
+                scheduler.step()
 
             # Reset gradients and accumulation counter
             optimizer.zero_grad()
@@ -418,12 +426,21 @@ def train(
     tokenizer = LaTeXTokenizer()
 
     # Load or create vocabulary
-    vocab_path = os.path.join(output_dir, "vocab.json")
+    vocab_file = data_config.get("vocab_file", "vocab.json")
+    vocab_path = os.path.join(output_dir, vocab_file)
+    
+    # Check for pre-existing vocabulary file in current output directory
     if os.path.exists(vocab_path):
         logging.info(f"Loading vocabulary from {vocab_path}")
         tokenizer.load_vocab(vocab_path)
     else:
-        logging.info("Building vocabulary from training data")
+        # If not found in current output dir, try a shared location if specified
+        shared_vocab_path = os.path.join(data_config.get("data_dir", "data"), vocab_file)
+        if os.path.exists(shared_vocab_path) and data_config.get("use_shared_vocab", False):
+            logging.info(f"Loading shared vocabulary from {shared_vocab_path}")
+            tokenizer.load_vocab(shared_vocab_path)
+        else:
+            logging.info("Building vocabulary from training data")
 
         # Get all LaTeX expressions from training data
         latex_expressions = []
@@ -434,6 +451,11 @@ def train(
 
             # Sample a subset of files for vocabulary building
             import random
+            
+            # Set a fixed seed for reproducible vocabulary generation
+            random_seed = config.get("data", {}).get("vocab_random_seed", 42)
+            random.seed(random_seed)
+            logging.info(f"Using random seed {random_seed} for vocabulary generation")
 
             file_list = [f for f in os.listdir(dir_path) if f.endswith(".inkml")]
             if len(file_list) > 10000:  # Limit to 10,000 files for efficiency
@@ -457,8 +479,16 @@ def train(
         # Build vocabulary
         tokenizer.build_vocab_from_data(latex_expressions, min_freq=5)
 
-        # Save vocabulary
+        # Save vocabulary to output directory
         tokenizer.save_vocab(vocab_path)
+        
+        # If shared vocabulary is enabled, also save to shared location
+        if data_config.get("use_shared_vocab", False):
+            shared_vocab_path = os.path.join(data_config.get("data_dir", "data"), vocab_file)
+            # Make sure parent directory exists (data_dir itself may need to be created)
+            os.makedirs(data_config.get("data_dir", "data"), exist_ok=True)
+            tokenizer.save_vocab(shared_vocab_path)
+            logging.info(f"Saved shared vocabulary to {shared_vocab_path} (for consistent training/resuming)")
 
     logging.info(f"Vocabulary size: {len(tokenizer)}")
 
@@ -512,6 +542,22 @@ def train(
     prefetch_factor = config.get("mps_options", {}).get("prefetch_factor", 2)
     persistent_workers = config.get("mps_options", {}).get("persistent_workers", False)
 
+    # Set seed for DataLoader workers to ensure reproducibility
+    dataloader_seed = data_config.get("dataloader_seed", 42)
+    
+    def seed_worker(worker_id):
+        """Function to set seed for DataLoader workers."""
+        worker_seed = dataloader_seed
+        torch.manual_seed(worker_seed)
+        import random
+        import numpy as np
+        random.seed(worker_seed)
+        np.random.seed(worker_seed)
+    
+    g = torch.Generator()
+    g.manual_seed(dataloader_seed)
+    logging.info(f"Using seed {dataloader_seed} for DataLoader")
+    
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
@@ -521,6 +567,8 @@ def train(
         prefetch_factor=prefetch_factor if num_workers > 0 else None,
         persistent_workers=persistent_workers if num_workers > 0 else False,
         collate_fn=train_dataset.collate_fn,
+        worker_init_fn=seed_worker,
+        generator=g,
     )
 
     valid_loader = DataLoader(
@@ -532,6 +580,8 @@ def train(
         prefetch_factor=prefetch_factor if num_workers > 0 else None,
         persistent_workers=persistent_workers if num_workers > 0 else False,
         collate_fn=valid_dataset.collate_fn,
+        worker_init_fn=seed_worker,
+        generator=g,
     )
 
     # Create model
@@ -542,10 +592,28 @@ def train(
 
     # Create optimizer and scheduler
     optimizer = get_optimizer(train_config, model.parameters())
+    
+    # For schedulers that need total steps information
+    scheduler_type = train_config.get("lr_scheduler", {}).get("type", "")
+    
+    # Calculate steps per epoch for batch-based schedulers
+    if scheduler_type in ["one_cycle", "linear_warmup"]:
+        steps_per_epoch = len(train_loader) // grad_accum_steps
+        train_config["lr_scheduler"]["steps_per_epoch"] = steps_per_epoch
+        train_config["lr_scheduler"]["epochs"] = num_epochs
+        
+        if scheduler_type == "one_cycle":
+            logging.info(f"OneCycleLR: Calculated steps_per_epoch={steps_per_epoch} for {num_epochs} epochs")
+        elif scheduler_type == "linear_warmup":
+            warmup_steps = train_config.get("lr_scheduler", {}).get("warmup_steps", 100)
+            warmup_epochs = warmup_steps / steps_per_epoch if steps_per_epoch > 0 else 0
+            logging.info(f"LinearWarmup: Warmup for {warmup_steps} steps (~{warmup_epochs:.1f} epochs)")
+    
     scheduler = get_scheduler(train_config, optimizer)
 
     # Create loss function
-    criterion = nn.CrossEntropyLoss(ignore_index=0)  # Ignore padding token (index 0)
+    label_smoothing = train_config.get("label_smoothing", 0.0)
+    criterion = nn.CrossEntropyLoss(ignore_index=0, label_smoothing=label_smoothing)  # Ignore padding token (index 0)
 
     # Initialize training state
     start_epoch = 0
@@ -613,6 +681,10 @@ def train(
             criterion,
             device,
             epoch,
+            scheduler=scheduler if (
+                isinstance(scheduler, torch.optim.lr_scheduler.OneCycleLR) or 
+                isinstance(scheduler, torch.optim.lr_scheduler.LambdaLR)
+            ) else None,
             use_amp=use_amp,
             grad_accum_steps=grad_accum_steps,
             clip_grad_norm=train_config.get("clip_grad_norm", 0.0),
@@ -841,11 +913,15 @@ def train(
                         f"Failed to log metrics or run analysis via TrainingMonitor: {e}"
                     )
 
-        # Update scheduler if using ReduceLROnPlateau
+        # Update scheduler if using ReduceLROnPlateau or other epoch-based schedulers
         if scheduler is not None:
             if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
                 scheduler.step(val_metrics["loss"])
-            else:
+            elif not (
+                isinstance(scheduler, torch.optim.lr_scheduler.OneCycleLR) or
+                isinstance(scheduler, torch.optim.lr_scheduler.LambdaLR)
+            ):
+                # These schedulers are updated after each batch, not after each epoch
                 scheduler.step()
 
         # Save model

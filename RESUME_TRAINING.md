@@ -22,6 +22,58 @@ This will:
 3. Use the settings from `fast_enhanced.yaml`
 4. Save outputs to a new directory `outputs/resumed_training`
 
+## Handling Vocabulary Size Mismatches
+
+If you encounter a vocabulary size mismatch error (e.g., when the checkpoint model was trained with a different vocabulary size), use the `expand_model.py` script to adapt the checkpoint:
+
+```bash
+python scripts/expand_model.py /path/to/original_checkpoint.pt /path/to/adapted_model.pt --config configs/fast_enhanced.yaml
+```
+
+Then resume training with the adapted model:
+
+```bash
+python cli.py train --config configs/fast_enhanced.yaml --checkpoint /path/to/adapted_model.pt --output-dir outputs/resumed_training
+```
+
+### Preventing Vocabulary Mismatches
+
+To prevent vocabulary mismatches in the future, you can:
+
+1. **Use a fixed random seed**: The vocabulary generation uses a fixed random seed (default: 42) that can be set in the config:
+   ```yaml
+   data:
+     vocab_random_seed: 42
+   ```
+
+2. **Enable shared vocabulary**: To use a consistent vocabulary across training runs, enable shared vocabulary in your config:
+   ```yaml
+   data:
+     vocab_file: "vocab.json"
+     use_shared_vocab: true
+   ```
+
+   This will save/load the vocabulary file from the data directory rather than the experiment-specific directory.
+
+3. **Save vocabulary explicitly**: After successful training, copy the vocabulary file to a known location:
+   ```bash
+   cp outputs/your_experiment/vocab.json data/vocab.json
+   ```
+
+### Ensuring Consistent Loss Values Between Runs
+
+To ensure consistent loss values between training runs, set a fixed seed for the DataLoader:
+
+```yaml
+data:
+  dataloader_seed: 42
+```
+
+This ensures that batches are created in a consistent order between runs, which helps:
+1. Stabilize initial loss values
+2. Make training progress more comparable between experiments 
+3. Reduce randomness in convergence behavior
+
 ## Understanding Where Checkpoints Are Saved
 
 By default, model checkpoints are saved in the following locations:
