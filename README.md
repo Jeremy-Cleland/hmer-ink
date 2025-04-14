@@ -21,6 +21,7 @@ The model is designed to work with the MathWriting dataset, which contains:
 - **Modular Architecture**: Flexible encoder-decoder models including Transformer, LSTM, and CNN options
 - **Apple Silicon Support**: Optimized for MPS on Apple Silicon Macs
 - **Data Augmentation**: Comprehensive augmentation pipeline for handwritten data
+- **Spatial Awareness**: Support for bounding box information from synthetic data
 - **Command Line Interface**: Simple CLI using Typer for training, evaluation, and visualization
 - **Training Monitoring**: Multi-view training progress tracking with interactive dashboard
 - **Logging and Visualization**: Support for TensorBoard and Weights & Biases integration
@@ -245,10 +246,13 @@ training:
 
 # Data processing settings
 data:
+  train_dirs: ["train", "symbols", "synthetic"]  # Include synthetic data with bounding boxes
+  use_synthetic: true                            # Enable synthetic data processing
+  
   normalization:
     x_range: [-1, 1]  # Target range for x coordinates
     y_range: [-1, 1]  # Target range for y coordinates
-    # Note: Aspect ratio is preserved by default to prevent distortion
+    preserve_aspect_ratio: true  # Prevent distortion by maintaining proportions
   
   augmentation:
     enabled: true
@@ -267,6 +271,7 @@ model:
   encoder:
     embedding_dim: 256  # Reduce for machines with less memory
     num_layers: 3       # Fewer layers = less memory usage
+    use_bbox_data: true # Enable bounding box data utilization
     
 # MPS specific settings - for Apple Silicon
 mps_configuration:
@@ -321,11 +326,14 @@ The model processes handwritten mathematical expressions through several stages:
    - **Normalization**: Coordinates are normalized to a consistent range ([-1, 1]) with aspect ratio preservation
    - **Relative Encoding**: Absolute coordinates are converted to relative movements (dx, dy)
    - **Stroke Flattening**: All strokes are combined into a single sequence with pen-up indicators
+   - **Synthetic Data**: For synthetic samples, bounding box information is loaded from `synthetic-bboxes.jsonl`
 
 2. **Encoder Processing**:
    - The preprocessed ink sequence is embedded into a higher-dimensional space
    - The encoder (Transformer/BiLSTM/CNN) processes this sequence
-   - Produces a context-aware representation of the handwritten expression
+   - For synthetic data, bounding box information is used to enhance spatial understanding
+   - The transformer encoder integrates bounding box embeddings with stroke features
+   - Produces a context-aware representation of the handwritten expression with spatial awareness
 
 3. **Decoder Generation**:
    - Starts with a special start token
@@ -337,7 +345,7 @@ The model processes handwritten mathematical expressions through several stages:
    - Converts token IDs back to LaTeX symbols
    - Assembles the complete LaTeX expression
 
-This approach effectively "translates" from the language of handwritten strokes to the language of LaTeX, similar to how machine translation works between natural languages.
+This approach effectively "translates" from the language of handwritten strokes to the language of LaTeX, similar to how machine translation works between natural languages. The use of synthetic data with bounding boxes helps the model better understand the spatial relationships between symbols in mathematical expressions.
 
 ## Performance Optimization
 
@@ -345,6 +353,29 @@ This approach effectively "translates" from the language of handwritten strokes 
 - Automatic Mixed Precision (AMP) for faster training
 - Beam search decoding for better prediction quality
 - Batched processing and data caching
+
+## Bounding Box Integration
+
+The model can now leverage bounding box information from synthetic data to improve mathematical expression recognition:
+
+1. **How It Works**:
+   - Bounding boxes provide spatial context about symbol positions and relationships
+   - Each box contains coordinates (x_min, y_min, x_max, y_max) and points it applies to
+   - The encoder converts these coordinates into embeddings that enhance point features
+   - This helps the model understand spatial arrangements like fractions, exponents, and matrices
+
+2. **Implementation Details**:
+   - `HMERSyntheticDataset` loads bounding box data from `synthetic-bboxes.jsonl`
+   - The `TransformerEncoder` with `use_bbox_data=true` processes this information
+   - Bounding box embeddings are added to corresponding point features before encoding
+   - The modified features retain both stroke and spatial information
+
+3. **Configuration**:
+   - Enable with `use_synthetic: true` in the data section
+   - Set `use_bbox_data: true` in the encoder section
+   - Only the transformer encoder currently supports bounding box integration
+
+This feature significantly improves recognition of complex expressions where spatial relationships are important.
 
 ## Future Development
 

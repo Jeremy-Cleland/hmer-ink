@@ -106,6 +106,7 @@ class TransformerEncoder(nn.Module):
         num_heads: int = 8,
         dropout: float = 0.1,
         max_length: int = 1024,
+        use_bbox_data: bool = False,
     ):
         """
         Initialize transformer encoder.
@@ -117,8 +118,12 @@ class TransformerEncoder(nn.Module):
             num_heads: Number of attention heads
             dropout: Dropout probability
             max_length: Maximum sequence length for positional encoding
+            use_bbox_data: Whether to use bounding box data
         """
         super(TransformerEncoder, self).__init__()
+
+        # Flag to indicate this encoder can use bounding box data
+        self.use_bbox_data = use_bbox_data
 
         # Stroke embedding
         self.embedding = StrokeEmbedding(input_dim, embedding_dim, dropout)
@@ -127,6 +132,12 @@ class TransformerEncoder(nn.Module):
         self.positional_encoding = PositionalEncoding(
             embedding_dim, max_length, dropout
         )
+
+        # Bounding box embedding if enabled
+        if use_bbox_data:
+            # 4 values for bbox: x_min, y_min, x_max, y_max
+            self.bbox_embedding = nn.Linear(4, embedding_dim)
+            self.bbox_norm = nn.LayerNorm(embedding_dim)
 
         # Transformer encoder layers
         encoder_layer = nn.TransformerEncoderLayer(
@@ -143,7 +154,10 @@ class TransformerEncoder(nn.Module):
         )
 
     def forward(
-        self, x: torch.Tensor, lengths: Optional[torch.Tensor] = None
+        self,
+        x: torch.Tensor,
+        lengths: Optional[torch.Tensor] = None,
+        bbox_data: Optional[List] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Encode ink strokes.
@@ -151,6 +165,7 @@ class TransformerEncoder(nn.Module):
         Args:
             x: Input tensor of shape [batch_size, seq_len, input_dim]
             lengths: Sequence lengths for masking
+            bbox_data: Optional bounding box data for enhancing spatial understanding
 
         Returns:
             Tuple of:
@@ -172,6 +187,44 @@ class TransformerEncoder(nn.Module):
 
         # Add positional encoding
         x = self.positional_encoding(x)
+
+        # Enhance with bounding box data if available and enabled
+        if self.use_bbox_data and bbox_data is not None:
+            for batch_idx, sample_bbox_data in enumerate(bbox_data):
+                if not sample_bbox_data:
+                    continue
+
+                # Process each bounding box
+                for bbox in sample_bbox_data:
+                    # Extract bbox coordinates, normalize to [-1, 1] range if not already
+                    bbox_coords = torch.tensor(
+                        [
+                            bbox.get("x_min", 0),
+                            bbox.get("y_min", 0),
+                            bbox.get("x_max", 1),
+                            bbox.get("y_max", 1),
+                        ],
+                        dtype=torch.float32,
+                        device=x.device,
+                    )
+
+                    # Process bbox data
+                    if "symbol_id" in bbox and "point_indices" in bbox:
+                        # Get corresponding point indices for this bbox
+                        point_indices = bbox["point_indices"]
+
+                        # Convert bbox to embedding
+                        bbox_embed = self.bbox_embedding(bbox_coords.view(1, -1))
+                        bbox_embed = F.relu(bbox_embed)
+                        bbox_embed = self.bbox_norm(bbox_embed)
+
+                        # Add bbox embedding to corresponding points
+                        for idx in point_indices:
+                            if idx < seq_len:
+                                # Add bbox information to the point features
+                                x[batch_idx, idx] = x[
+                                    batch_idx, idx
+                                ] + bbox_embed.squeeze(0)
 
         # Apply transformer encoder
         # Note: In PyTorch transformer, True in mask means to ignore that position
@@ -397,6 +450,9 @@ def get_encoder(config: Dict) -> nn.Module:
     num_heads = encoder_config.get("num_heads", 8)
     dropout = encoder_config.get("dropout", 0.1)
 
+    # Check if bounding box data should be used
+    use_bbox_data = encoder_config.get("use_bbox_data", False)
+
     if encoder_type == "transformer":
         return TransformerEncoder(
             input_dim=input_dim,
@@ -404,6 +460,7 @@ def get_encoder(config: Dict) -> nn.Module:
             num_layers=num_layers,
             num_heads=num_heads,
             dropout=dropout,
+            use_bbox_data=use_bbox_data,
         )
     elif encoder_type == "bilstm":
         hidden_dim = encoder_config.get("hidden_dim", embedding_dim)

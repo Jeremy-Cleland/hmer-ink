@@ -4,12 +4,12 @@
 # Data settings
 data:
   data_dir: "data"
-  train_dirs: ["train", "symbols"] # Both datasets for better symbol recognition
+  train_dirs: ["train", "symbols", "synthetic"] # Include synthetic data with bounding boxes
   valid_dir: "valid"
   test_dir: "test"
   max_seq_length: 384
   max_token_length: 224
-  use_synthetic: false
+  use_synthetic: true # Enable synthetic data with bounding boxes
   vocab_random_seed: 42
   dataloader_seed: 42 # Fixed seed for DataLoader to ensure consistent batching
   vocab_file: "vocab.json"
@@ -18,14 +18,18 @@ data:
     x_range: [-1, 1]
     y_range: [-1, 1]
     time_range: [0, 1]
+    preserve_aspect_ratio: true  # Prevent distortion by maintaining original proportions
   augmentation:
     enabled: true
-    scale_range: [0.85, 1.15] # Conservative scaling in early training
-    rotation_range: [-8, 8] # Minimal rotation to start with
-    translation_range: [-0.08, 0.08]
-    stroke_dropout_prob: 0.03
-    jitter_scale: 0.008
-    stroke_thickness_range: [1.0, 2.0]
+    scale_range: [0.9, 1.1] # Very conservative scaling to prevent distortion
+    rotation_range: [-10, 10] # Rotation angles in degrees
+    rotation_probability: 0.7 # Probability of applying rotation
+    translation_range: [-0.05, 0.05] # Small translations
+    stroke_dropout_prob: 0.03 # Low probability of stroke dropout
+    max_dropout_ratio: 0.2 # Maximum ratio of strokes that can be dropped
+    jitter_scale: 0.005 # Minimal jitter to retain legibility
+    jitter_probability: 0.7 # Probability of applying jitter to each point
+    stroke_thickness_range: [1.0, 2.0] # Original thickness values
 
 # Model architecture - optimal for math expression recognition
 model:
@@ -38,6 +42,7 @@ model:
     num_heads: 8
     dropout: 0.1 # Lower dropout for better training signal
     position_encoding: "sinusoidal"
+    use_bbox_data: true # Enable bounding box data utilization
   decoder:
     type: "transformer"
     embedding_dim: 320

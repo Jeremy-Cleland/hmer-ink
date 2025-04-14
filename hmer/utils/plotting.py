@@ -14,11 +14,11 @@ from matplotlib.backends.backend_pdf import PdfPages
 
 from ..data.inkml import InkmlParser
 from ..data.transforms import (
-    RandomJitter, 
+    RandomJitter,
     RandomRotation,
-    RandomScale, 
+    RandomScale,
     RandomStrokeDropout,
-    RandomTranslation
+    RandomTranslation,
 )
 
 logger = logging.getLogger(__name__)
@@ -349,56 +349,60 @@ def style_plot(fig: plt.Figure, ax: Union[plt.Axes, np.ndarray]):
 
 # --- HMER Ink Visualization Functions ---
 
-def get_sample_inkml_files(data_dir: str, split: str = "test", num_samples: int = 5, seed: Optional[int] = None) -> List[str]:
+
+def get_sample_inkml_files(
+    data_dir: str, split: str = "test", num_samples: int = 5, seed: Optional[int] = None
+) -> List[str]:
     """
     Get a list of sample InkML files from a specific split.
-    
+
     Args:
         data_dir: Root directory of the dataset
         split: Dataset split to sample from ('train', 'test', 'valid', etc.)
         num_samples: Number of samples to return
         seed: Random seed for reproducibility
-        
+
     Returns:
         List of absolute paths to InkML files
     """
     import glob
     import os
     import random
-    
+
     # Set random seed if provided
     if seed is not None:
         random.seed(seed)
-    
+
     # Get all InkML files in the directory
     split_dir = os.path.join(data_dir, split)
     if not os.path.exists(split_dir):
         logger.warning(f"Split directory {split_dir} does not exist")
         return []
-        
+
     inkml_files = glob.glob(os.path.join(split_dir, "*.inkml"))
-    
+
     if not inkml_files:
         logger.warning(f"No InkML files found in {split_dir}")
         return []
-        
+
     # Sample randomly
     if len(inkml_files) <= num_samples:
         return inkml_files
     else:
         return random.sample(inkml_files, num_samples)
 
+
 def plot_strokes(
-    ax: plt.Axes, 
-    strokes: List[np.ndarray], 
-    invert_y: bool = True, 
+    ax: plt.Axes,
+    strokes: List[np.ndarray],
+    invert_y: bool = True,
     show_points: bool = True,
     colorful: bool = True,
-    alpha: float = 0.8
+    alpha: float = 0.8,
 ):
     """
     Plot a list of strokes on the given axes.
-    
+
     Args:
         ax: Matplotlib axes to plot on
         strokes: List of strokes as numpy arrays with (x, y, t) coordinates
@@ -409,28 +413,33 @@ def plot_strokes(
     """
     if not strokes:
         return
-        
+
     if colorful:
         colors = plt.cm.jet(np.linspace(0, 1, len(strokes)))
     else:
-        colors = ['blue'] * len(strokes)
-        
+        colors = ["blue"] * len(strokes)
+
     for i, stroke in enumerate(strokes):
         # Extract x and y coordinates
         x_coords = stroke[:, 0]
         y_coords = stroke[:, 1] * (-1 if invert_y else 1)
-        
+
         # Plot the stroke
         ax.plot(x_coords, y_coords, color=colors[i], alpha=alpha, linewidth=2)
-        
+
         # Show start and end points if requested
         if show_points:
-            ax.scatter(x_coords[0], y_coords[0], color='green', s=30, zorder=5)  # Start point
-            ax.scatter(x_coords[-1], y_coords[-1], color='red', s=30, zorder=5)  # End point
-            
+            ax.scatter(
+                x_coords[0], y_coords[0], color="green", s=30, zorder=5
+            )  # Start point
+            ax.scatter(
+                x_coords[-1], y_coords[-1], color="red", s=30, zorder=5
+            )  # End point
+
     # Set equal aspect ratio and remove axes
-    ax.set_aspect('equal')
+    ax.set_aspect("equal")
     ax.set_axis_off()
+
 
 def visualize_ink_normalization(
     inkml_file: str,
@@ -438,11 +447,11 @@ def visualize_ink_normalization(
     x_range: Tuple[float, float] = (-1, 1),
     y_range: Tuple[float, float] = (-1, 1),
     time_range: Optional[Tuple[float, float]] = None,
-    show: bool = False
+    show: bool = False,
 ) -> plt.Figure:
     """
     Visualize the normalization process for an InkML file.
-    
+
     Args:
         inkml_file: Path to the InkML file
         output_path: Path to save the visualization (PDF format)
@@ -450,84 +459,88 @@ def visualize_ink_normalization(
         y_range: Target range for y coordinates normalization
         time_range: Target range for time values normalization
         show: Whether to display the plot
-        
+
     Returns:
         Matplotlib figure
     """
     # Parse the InkML file
     parser = InkmlParser()
     ink_data = parser.parse_inkml(inkml_file)
-    
+
     # Get raw strokes
     raw_strokes = ink_data["strokes"]
-    
+
     # Normalize strokes with aspect ratio preservation
     normalized_strokes = parser.normalize_strokes(
-        raw_strokes, x_range=x_range, y_range=y_range, time_range=time_range,
-        preserve_aspect_ratio=True
+        raw_strokes,
+        x_range=x_range,
+        y_range=y_range,
+        time_range=time_range,
+        preserve_aspect_ratio=True,
     )
-    
+
     # Convert to relative coordinates for visualization
     relative_strokes = parser.get_relative_coordinates(normalized_strokes)
-    
+
     # Recreate absolute coordinates from relative for visualization
     reconstructed_strokes = []
     for rel_stroke in relative_strokes:
         abs_stroke = np.zeros((rel_stroke.shape[0], 3))  # x, y, t
-        
+
         # First point is absolute
         abs_stroke[0, :] = rel_stroke[0, :3]  # Copy first point
-        
+
         # Reconstruct subsequent points
         for i in range(1, rel_stroke.shape[0]):
-            abs_stroke[i, :] = abs_stroke[i-1, :] + rel_stroke[i, :3]
-            
+            abs_stroke[i, :] = abs_stroke[i - 1, :] + rel_stroke[i, :3]
+
         reconstructed_strokes.append(abs_stroke)
-    
+
     # Create figure
     fig, axs = plt.subplots(1, 3, figsize=(15, 5))
-    
+
     # Set title
     fig.suptitle(
         f"Ink Normalization Visualization: {ink_data.get('normalized_label', '')}",
-        fontsize=14
+        fontsize=14,
     )
-    
+
     # Plot original strokes
     axs[0].set_title("Original Strokes")
     plot_strokes(axs[0], raw_strokes)
-    
+
     # Plot normalized strokes
     axs[1].set_title(f"Normalized Strokes\n(Range: {x_range}, {y_range})")
     plot_strokes(axs[1], normalized_strokes)
-    
+
     # Plot reconstructed from relative strokes
     axs[2].set_title("Reconstructed from Relative")
     plot_strokes(axs[2], reconstructed_strokes)
-    
+
     # Add grid lines to the normalized and reconstructed plots
-    axs[1].grid(True, linestyle='--', alpha=0.3)
-    axs[2].grid(True, linestyle='--', alpha=0.3)
-    
+    axs[1].grid(True, linestyle="--", alpha=0.3)
+    axs[2].grid(True, linestyle="--", alpha=0.3)
+
     # Add coordinate bounds to normalized plot
-    axs[1].axhline(y=y_range[0], color='gray', linestyle='--', alpha=0.5)
-    axs[1].axhline(y=y_range[1], color='gray', linestyle='--', alpha=0.5)
-    axs[1].axvline(x=x_range[0], color='gray', linestyle='--', alpha=0.5)
-    axs[1].axvline(x=x_range[1], color='gray', linestyle='--', alpha=0.5)
-    
+    axs[1].axhline(y=y_range[0], color="gray", linestyle="--", alpha=0.5)
+    axs[1].axhline(y=y_range[1], color="gray", linestyle="--", alpha=0.5)
+    axs[1].axvline(x=x_range[0], color="gray", linestyle="--", alpha=0.5)
+    axs[1].axvline(x=x_range[1], color="gray", linestyle="--", alpha=0.5)
+
     plt.tight_layout()
-    
+
     # Save if output path is provided
     if output_path:
         with PdfPages(output_path) as pdf:
             pdf.savefig(fig)
         logger.info(f"Visualization saved to {output_path}")
-            
+
     # Show if requested
     if show:
         plt.show()
-    
+
     return fig
+
 
 def visualize_augmentations(
     inkml_file: str,
@@ -536,11 +549,11 @@ def visualize_augmentations(
     y_range: Tuple[float, float] = (-1, 1),
     time_range: Optional[Tuple[float, float]] = None,
     show: bool = False,
-    seed: Optional[int] = None
+    seed: Optional[int] = None,
 ) -> plt.Figure:
     """
     Visualize the effects of different augmentations on an InkML file.
-    
+
     Args:
         inkml_file: Path to the InkML file
         output_path: Path to save the visualization (PDF format)
@@ -549,158 +562,159 @@ def visualize_augmentations(
         time_range: Target range for time values normalization
         show: Whether to display the plot
         seed: Random seed for reproducibility
-        
+
     Returns:
         Matplotlib figure
     """
     # Set random seed if provided
     if seed is not None:
         np.random.seed(seed)
-    
+
     # Parse the InkML file
     parser = InkmlParser()
     ink_data = parser.parse_inkml(inkml_file)
-    
+
     # Get raw strokes
     raw_strokes = ink_data["strokes"]
-    
+
     # Normalize strokes with aspect ratio preservation
     normalized_strokes = parser.normalize_strokes(
-        raw_strokes, x_range=x_range, y_range=y_range, time_range=time_range,
-        preserve_aspect_ratio=True
+        raw_strokes,
+        x_range=x_range,
+        y_range=y_range,
+        time_range=time_range,
+        preserve_aspect_ratio=True,
     )
-    
+
     # Convert to relative coordinates
     relative_strokes = parser.get_relative_coordinates(normalized_strokes)
-    
+
     # Flatten strokes
     flattened = parser.flatten_strokes(relative_strokes)
-    
+
     # Apply different augmentations with adaptive parameters based on sample complexity
-    scale_aug = RandomScale(scale_range=(0.95, 1.05))(flattened.copy())  # Very mild scaling
-    
+    scale_aug = RandomScale(scale_range=(0.95, 1.05))(
+        flattened.copy()
+    )  # Very mild scaling
+
     # Rotation with adaptive behavior based on sequence length
-    rotation_aug = RandomRotation(
-        angle_range=(-10, 10), 
-        max_probability=0.7
-    )(flattened.copy())
-    
+    rotation_aug = RandomRotation(angle_range=(-10, 10), max_probability=0.7)(
+        flattened.copy()
+    )
+
     # Mild translations
-    translation_aug = RandomTranslation(
-        translation_range=(-0.05, 0.05)
-    )(flattened.copy())
-    
+    translation_aug = RandomTranslation(translation_range=(-0.05, 0.05))(
+        flattened.copy()
+    )
+
     # Jitter with protective measures for complex expressions
-    jitter_aug = RandomJitter(
-        jitter_scale=0.005,
-        max_probability=0.7
-    )(flattened.copy())
-    
+    jitter_aug = RandomJitter(jitter_scale=0.005, max_probability=0.7)(flattened.copy())
+
     # Stroke dropout with safety measures
-    dropout_aug = RandomStrokeDropout(
-        dropout_prob=0.03,
-        max_dropout_ratio=0.2
-    )(flattened.copy())
-    
+    dropout_aug = RandomStrokeDropout(dropout_prob=0.03, max_dropout_ratio=0.2)(
+        flattened.copy()
+    )
+
     # Create figure
     fig, axs = plt.subplots(2, 3, figsize=(15, 10))
     axs = axs.flatten()
-    
+
     # Set title
     fig.suptitle(
         f"Data Augmentation Visualization: {ink_data.get('normalized_label', '')}",
-        fontsize=14
+        fontsize=14,
     )
-    
+
     # Helper function to convert flattened relative coordinates back to strokes for visualization
     def rel_to_abs_for_vis(rel_data):
         abs_data = np.zeros_like(rel_data)
         abs_data[0] = rel_data[0]  # First point is absolute
-        
+
         # Reconstruct subsequent points
         for i in range(1, rel_data.shape[0]):
-            abs_data[i, :2] = abs_data[i-1, :2] + rel_data[i, :2]
+            abs_data[i, :2] = abs_data[i - 1, :2] + rel_data[i, :2]
             abs_data[i, 2:] = rel_data[i, 2:]  # Keep time and pen state
-            
+
         # Split into strokes based on pen-up signal
         strokes = []
         stroke_start = 0
-        
+
         for i in range(abs_data.shape[0]):
             # Check if pen is up (last dimension)
             if abs_data[i, -1] >= 0.5 or i == abs_data.shape[0] - 1:
                 # Extract stroke up to this point
-                stroke = abs_data[stroke_start:i+1, :3]  # Keep only x, y, t
+                stroke = abs_data[stroke_start : i + 1, :3]  # Keep only x, y, t
                 strokes.append(stroke)
                 stroke_start = i + 1
-                
+
         return strokes
-    
+
     # Plot original
     normalized_abs = rel_to_abs_for_vis(flattened)
     axs[0].set_title("Original (Normalized)")
     plot_strokes(axs[0], normalized_abs)
-    
+
     # Plot scaled
     scale_abs = rel_to_abs_for_vis(scale_aug)
     axs[1].set_title("Random Scaling")
     plot_strokes(axs[1], scale_abs)
-    
+
     # Plot rotated
     rotation_abs = rel_to_abs_for_vis(rotation_aug)
     axs[2].set_title("Random Rotation")
     plot_strokes(axs[2], rotation_abs)
-    
+
     # Plot translated
     translation_abs = rel_to_abs_for_vis(translation_aug)
     axs[3].set_title("Random Translation")
     plot_strokes(axs[3], translation_abs)
-    
+
     # Plot jittered
     jitter_abs = rel_to_abs_for_vis(jitter_aug)
     axs[4].set_title("Random Jitter")
     plot_strokes(axs[4], jitter_abs)
-    
+
     # Plot with dropout
     dropout_abs = rel_to_abs_for_vis(dropout_aug)
     axs[5].set_title("Stroke Dropout")
     plot_strokes(axs[5], dropout_abs)
-    
+
     # Add grid to all plots
     for ax in axs:
-        ax.grid(True, linestyle='--', alpha=0.3)
-        
+        ax.grid(True, linestyle="--", alpha=0.3)
+
         # Add coordinate bounds
-        ax.axhline(y=y_range[0], color='gray', linestyle='--', alpha=0.3)
-        ax.axhline(y=y_range[1], color='gray', linestyle='--', alpha=0.3)
-        ax.axvline(x=x_range[0], color='gray', linestyle='--', alpha=0.3)
-        ax.axvline(x=x_range[1], color='gray', linestyle='--', alpha=0.3)
-    
+        ax.axhline(y=y_range[0], color="gray", linestyle="--", alpha=0.3)
+        ax.axhline(y=y_range[1], color="gray", linestyle="--", alpha=0.3)
+        ax.axvline(x=x_range[0], color="gray", linestyle="--", alpha=0.3)
+        ax.axvline(x=x_range[1], color="gray", linestyle="--", alpha=0.3)
+
     plt.tight_layout()
-    
+
     # Save if output path is provided
     if output_path:
         with PdfPages(output_path) as pdf:
             pdf.savefig(fig)
         logger.info(f"Visualization saved to {output_path}")
-            
+
     # Show if requested
     if show:
         plt.show()
-    
+
     return fig
 
+
 def batch_visualize_samples(
-    data_dir: str, 
+    data_dir: str,
     output_dir: str,
     split: str = "test",
     num_samples: int = 5,
     visualization_types: List[str] = ["basic", "normalization", "augmentation"],
-    seed: Optional[int] = None
+    seed: Optional[int] = None,
 ) -> None:
     """
     Generate visualizations for multiple samples in batch mode.
-    
+
     Args:
         data_dir: Root directory of the dataset
         output_dir: Directory to save visualizations
@@ -710,33 +724,35 @@ def batch_visualize_samples(
         seed: Random seed for reproducibility
     """
     import os
-    
+
     # Create output directory if it doesn't exist
     os.makedirs(output_dir, exist_ok=True)
-    
+
     # Get sample files
     sample_files = get_sample_inkml_files(data_dir, split, num_samples, seed)
-    
+
     if not sample_files:
         logger.warning(f"No sample files found in {data_dir}/{split}")
         return
-    
-    logger.info(f"Generating visualizations for {len(sample_files)} samples from {split} split")
-    
+
+    logger.info(
+        f"Generating visualizations for {len(sample_files)} samples from {split} split"
+    )
+
     # Generate visualizations for each sample
     for i, inkml_file in enumerate(sample_files):
-        file_id = os.path.basename(inkml_file).split('.')[0]
-        logger.info(f"Processing sample {i+1}/{len(sample_files)}: {file_id}")
-        
+        file_id = os.path.basename(inkml_file).split(".")[0]
+        logger.info(f"Processing sample {i + 1}/{len(sample_files)}: {file_id}")
+
         # Parse the file to get the label
         parser = InkmlParser()
         ink_data = parser.parse_inkml(inkml_file)
         label = ink_data.get("normalized_label", "") or ink_data.get("label", "")
         label_safe = label.replace("\\", "").replace("/", "").replace("$", "")[:30]
-        
+
         # Basic visualization
         if "basic" in visualization_types:
-            output_path = os.path.join(output_dir, f"{i+1}_{file_id}_basic.pdf")
+            output_path = os.path.join(output_dir, f"{i + 1}_{file_id}_basic.pdf")
             try:
                 # Create basic visualization
                 fig, ax = plt.subplots(figsize=(10, 6))
@@ -750,35 +766,38 @@ def batch_visualize_samples(
                 logger.info(f"  - Basic visualization saved to {output_path}")
             except Exception as e:
                 logger.error(f"  - Error creating basic visualization: {e}")
-        
+
         # Normalization visualization
         if "normalization" in visualization_types:
-            output_path = os.path.join(output_dir, f"{i+1}_{file_id}_normalization.pdf")
+            output_path = os.path.join(
+                output_dir, f"{i + 1}_{file_id}_normalization.pdf"
+            )
             try:
                 fig = visualize_ink_normalization(
-                    inkml_file=inkml_file,
-                    output_path=output_path,
-                    show=False
+                    inkml_file=inkml_file, output_path=output_path, show=False
                 )
                 logger.info(f"  - Normalization visualization saved to {output_path}")
             except Exception as e:
                 logger.error(f"  - Error creating normalization visualization: {e}")
-        
+
         # Augmentation visualization
         if "augmentation" in visualization_types:
-            output_path = os.path.join(output_dir, f"{i+1}_{file_id}_augmentation.pdf")
+            output_path = os.path.join(
+                output_dir, f"{i + 1}_{file_id}_augmentation.pdf"
+            )
             try:
                 fig = visualize_augmentations(
                     inkml_file=inkml_file,
                     output_path=output_path,
                     seed=seed,
-                    show=False
+                    show=False,
                 )
                 logger.info(f"  - Augmentation visualization saved to {output_path}")
             except Exception as e:
                 logger.error(f"  - Error creating augmentation visualization: {e}")
-    
+
     logger.info(f"Visualization generation completed. Files saved to {output_dir}")
+
 
 # Example Usage (can be removed or kept for testing)
 if __name__ == "__main__":
@@ -806,6 +825,7 @@ if __name__ == "__main__":
 
     # Test ink visualization if a command line argument is provided
     import sys
+
     if len(sys.argv) > 1:
         if sys.argv[1] == "--batch":
             # Batch mode
@@ -813,31 +833,31 @@ if __name__ == "__main__":
             output_dir = sys.argv[3] if len(sys.argv) > 3 else "sample_visualizations"
             split = sys.argv[4] if len(sys.argv) > 4 else "test"
             num_samples = int(sys.argv[5]) if len(sys.argv) > 5 else 5
-            
-            logger.info(f"Batch visualizing {num_samples} samples from {data_dir}/{split}")
+
+            logger.info(
+                f"Batch visualizing {num_samples} samples from {data_dir}/{split}"
+            )
             batch_visualize_samples(
                 data_dir=data_dir,
                 output_dir=output_dir,
                 split=split,
                 num_samples=num_samples,
-                seed=42
+                seed=42,
             )
         else:
             # Single file mode
             inkml_file = sys.argv[1]
             logger.info(f"Testing visualization with {inkml_file}")
-            
+
             # Normalize visualization
             visualize_ink_normalization(
-                inkml_file, 
-                output_path="normalization_visualization.pdf",
-                show=False
+                inkml_file, output_path="normalization_visualization.pdf", show=False
             )
-            
+
             # Augmentation visualization
             visualize_augmentations(
-                inkml_file, 
+                inkml_file,
                 output_path="augmentation_visualization.pdf",
                 seed=42,
-                show=False
+                show=False,
             )

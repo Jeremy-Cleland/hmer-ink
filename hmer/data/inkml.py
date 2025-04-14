@@ -121,7 +121,7 @@ class InkmlParser:
         if preserve_aspect_ratio and x_scale > 0 and y_scale > 0:
             # Calculate original aspect ratio
             original_aspect_ratio = x_scale / y_scale
-            
+
             # Calculate the scaling factor to fit within the target bounds
             # while preserving aspect ratio
             if original_aspect_ratio > 1:  # wider than tall
@@ -153,18 +153,30 @@ class InkmlParser:
                     # Normalize to [0, 1] first
                     normalized_stroke[:, 0] = (stroke[:, 0] - x_min) / x_scale
                     normalized_stroke[:, 1] = (stroke[:, 1] - y_min) / y_scale
-                    
+
                     # Scale to target size while preserving aspect ratio
-                    normalized_stroke[:, 0] = normalized_stroke[:, 0] * target_width + x_range[0]
-                    normalized_stroke[:, 1] = normalized_stroke[:, 1] * effective_height + y_range[0] + y_offset
+                    normalized_stroke[:, 0] = (
+                        normalized_stroke[:, 0] * target_width + x_range[0]
+                    )
+                    normalized_stroke[:, 1] = (
+                        normalized_stroke[:, 1] * effective_height
+                        + y_range[0]
+                        + y_offset
+                    )
                 else:
                     # Normalize to [0, 1] first
                     normalized_stroke[:, 0] = (stroke[:, 0] - x_min) / x_scale
                     normalized_stroke[:, 1] = (stroke[:, 1] - y_min) / y_scale
-                    
+
                     # Scale to target size while preserving aspect ratio
-                    normalized_stroke[:, 0] = normalized_stroke[:, 0] * effective_width + x_range[0] + x_offset
-                    normalized_stroke[:, 1] = normalized_stroke[:, 1] * target_height + y_range[0]
+                    normalized_stroke[:, 0] = (
+                        normalized_stroke[:, 0] * effective_width
+                        + x_range[0]
+                        + x_offset
+                    )
+                    normalized_stroke[:, 1] = (
+                        normalized_stroke[:, 1] * target_height + y_range[0]
+                    )
             else:
                 # Standard normalization without preserving aspect ratio
                 normalized_stroke[:, 0] = (stroke[:, 0] - x_min) / x_scale

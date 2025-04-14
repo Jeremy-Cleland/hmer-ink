@@ -92,6 +92,9 @@ def evaluate(
     x_range = data_config.get("normalization", {}).get("x_range", (-1, 1))
     y_range = data_config.get("normalization", {}).get("y_range", (-1, 1))
     time_range = data_config.get("normalization", {}).get("time_range", (0, 1))
+    preserve_aspect_ratio = data_config.get("normalization", {}).get(
+        "preserve_aspect_ratio", True
+    )
 
     # Create dataset
     dataset = HMERDataset(
@@ -106,6 +109,7 @@ def evaluate(
         x_range=x_range,
         y_range=y_range,
         time_range=time_range,
+        preserve_aspect_ratio=preserve_aspect_ratio,
     )
 
     logging.info(f"Created dataset with {len(dataset)} samples")

@@ -96,12 +96,19 @@ def train_epoch(
         input_lengths = batch["input_lengths"].to(device)
         target_lengths = batch["target_lengths"].to(device)
 
+        # Get bounding box data if available
+        bbox_data = batch.get("bbox_data", None)
+
         # Forward pass with AMP if enabled
         if use_amp:
             with autocast(device_type=device.type):
                 # Forward pass
                 logits = model(
-                    input_seq, target_seq[:, :-1], input_lengths, target_lengths - 1
+                    input_seq,
+                    target_seq[:, :-1],
+                    input_lengths,
+                    target_lengths - 1,
+                    bbox_data=bbox_data,
                 )
 
                 # Calculate loss
@@ -119,7 +126,11 @@ def train_epoch(
         else:
             # Forward pass (without AMP)
             logits = model(
-                input_seq, target_seq[:, :-1], input_lengths, target_lengths - 1
+                input_seq,
+                target_seq[:, :-1],
+                input_lengths,
+                target_lengths - 1,
+                bbox_data=bbox_data,
             )
 
             # Calculate loss
@@ -234,9 +245,16 @@ def validate(
             target_lengths = batch["target_lengths"].to(device)
             labels = batch["labels"]
 
+            # Get bounding box data if available
+            bbox_data = batch.get("bbox_data", None)
+
             # Forward pass for loss calculation
             logits = model(
-                input_seq, target_seq[:, :-1], input_lengths, target_lengths - 1
+                input_seq,
+                target_seq[:, :-1],
+                input_lengths,
+                target_lengths - 1,
+                bbox_data=bbox_data,
             )
 
             # Calculate loss
@@ -264,12 +282,22 @@ def validate(
                 gen_labels = labels
 
             # Generate predictions with beam search (faster settings in fast mode)
+            # Extract bbox_data for generation if available
+            gen_bbox_data = None
+            if bbox_data is not None:
+                if fast_mode and input_seq.size(0) > 8:
+                    # Use the same subset as for input sequence
+                    gen_bbox_data = [bbox_data[i] for i in gen_indices]
+                else:
+                    gen_bbox_data = bbox_data
+
             beam_results, _ = model.generate(
                 gen_input_seq,
                 gen_input_lengths,
                 max_length=max_gen_length,
                 beam_size=effective_beam_size,
                 fast_mode=True,  # Enable fast generation mode
+                bbox_data=gen_bbox_data,
             )
 
             # Decode predictions and calculate individual NED scores
@@ -512,21 +540,49 @@ def train(
     x_range = data_config.get("normalization", {}).get("x_range", (-1, 1))
     y_range = data_config.get("normalization", {}).get("y_range", (-1, 1))
     time_range = data_config.get("normalization", {}).get("time_range", (0, 1))
-
-    # Create training dataset
-    train_dataset = HMERDataset(
-        data_dir=data_dir,
-        split_dirs=train_dirs,
-        tokenizer=tokenizer,
-        max_seq_length=data_config.get("max_seq_length", 512),
-        max_token_length=data_config.get("max_token_length", 128),
-        transform=train_transform,
-        normalize=normalize,
-        use_relative_coords=True,
-        x_range=x_range,
-        y_range=y_range,
-        time_range=time_range,
+    preserve_aspect_ratio = data_config.get("normalization", {}).get(
+        "preserve_aspect_ratio", True
     )
+
+    # Check if we should use synthetic data with bounding boxes
+    use_synthetic = data_config.get("use_synthetic", False)
+    contains_synthetic = any("synthetic" in dir_name for dir_name in train_dirs)
+
+    if use_synthetic and contains_synthetic:
+        # Use the synthetic dataset with bounding box information
+        logging.info("Using HMERSyntheticDataset with bounding box information")
+        from hmer.data.dataset import HMERSyntheticDataset
+
+        train_dataset = HMERSyntheticDataset(
+            data_dir=data_dir,
+            split_dirs=train_dirs,
+            tokenizer=tokenizer,
+            max_seq_length=data_config.get("max_seq_length", 512),
+            max_token_length=data_config.get("max_token_length", 128),
+            transform=train_transform,
+            normalize=normalize,
+            use_relative_coords=True,
+            x_range=x_range,
+            y_range=y_range,
+            time_range=time_range,
+            preserve_aspect_ratio=preserve_aspect_ratio,
+        )
+    else:
+        # Use the regular dataset
+        train_dataset = HMERDataset(
+            data_dir=data_dir,
+            split_dirs=train_dirs,
+            tokenizer=tokenizer,
+            max_seq_length=data_config.get("max_seq_length", 512),
+            max_token_length=data_config.get("max_token_length", 128),
+            transform=train_transform,
+            normalize=normalize,
+            use_relative_coords=True,
+            x_range=x_range,
+            y_range=y_range,
+            time_range=time_range,
+            preserve_aspect_ratio=preserve_aspect_ratio,
+        )
 
     # Create validation dataset
     valid_dataset = HMERDataset(
@@ -541,6 +597,7 @@ def train(
         x_range=x_range,
         y_range=y_range,
         time_range=time_range,
+        preserve_aspect_ratio=preserve_aspect_ratio,
     )
 
     logging.info(f"Train dataset size: {len(train_dataset)}")

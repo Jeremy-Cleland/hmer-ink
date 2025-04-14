@@ -31,6 +31,7 @@ class HMERDataset(Dataset):
         x_range: Tuple[float, float] = (-1, 1),
         y_range: Tuple[float, float] = (-1, 1),
         time_range: Optional[Tuple[float, float]] = (0, 1),
+        preserve_aspect_ratio: bool = True,
         cache_dir: Optional[str] = None,
     ):
         """
@@ -61,6 +62,7 @@ class HMERDataset(Dataset):
         self.x_range = x_range
         self.y_range = y_range
         self.time_range = time_range
+        self.preserve_aspect_ratio = preserve_aspect_ratio
         self.cache_dir = cache_dir
 
         # Parser for InkML files
@@ -135,7 +137,7 @@ class HMERDataset(Dataset):
                 x_range=self.x_range,
                 y_range=self.y_range,
                 time_range=self.time_range,
-                preserve_aspect_ratio=True,  # Preserve aspect ratio to avoid distortion
+                preserve_aspect_ratio=self.preserve_aspect_ratio,  # Use config setting
             )
 
         # Convert to relative coordinates if requested
@@ -282,3 +284,32 @@ class HMERSyntheticDataset(HMERDataset):
                 sample["bbox_data"] = bbox_data.get("bboxes", [])
 
         return sample
+
+    def collate_fn(self, batch: List[Dict]) -> Dict[str, torch.Tensor]:
+        """
+        Custom collate function that handles bounding box data.
+
+        Args:
+            batch: List of samples
+
+        Returns:
+            Dictionary with batched tensors
+        """
+        # Use parent's collate function
+        batched = super().collate_fn(batch)
+
+        # Add bounding box data if available
+        bbox_data = []
+        has_bbox_data = False
+
+        for sample in batch:
+            if "bbox_data" in sample:
+                has_bbox_data = True
+                bbox_data.append(sample["bbox_data"])
+            else:
+                bbox_data.append([])  # Empty list for samples without bbox data
+
+        if has_bbox_data:
+            batched["bbox_data"] = bbox_data
+
+        return batched

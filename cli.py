@@ -178,8 +178,11 @@ def predict_command(
 
     # Normalize strokes with aspect ratio preservation
     normalized_strokes = parser.normalize_strokes(
-        strokes, x_range=x_range, y_range=y_range, time_range=time_range,
-        preserve_aspect_ratio=True  # Preserve aspect ratio to avoid distortion
+        strokes,
+        x_range=x_range,
+        y_range=y_range,
+        time_range=time_range,
+        preserve_aspect_ratio=True,  # Preserve aspect ratio to avoid distortion
     )
 
     # Convert to relative coordinates
@@ -315,34 +318,42 @@ def visualize_normalization_command(
         None, "--output", "-o", help="Path to save visualization"
     ),
     show: bool = typer.Option(False, "--show", help="Show visualization"),
-    x_min: float = typer.Option(-1.0, "--x-min", help="Minimum x-coordinate after normalization"),
-    x_max: float = typer.Option(1.0, "--x-max", help="Maximum x-coordinate after normalization"),
-    y_min: float = typer.Option(-1.0, "--y-min", help="Minimum y-coordinate after normalization"),
-    y_max: float = typer.Option(1.0, "--y-max", help="Maximum y-coordinate after normalization"),
+    x_min: float = typer.Option(
+        -1.0, "--x-min", help="Minimum x-coordinate after normalization"
+    ),
+    x_max: float = typer.Option(
+        1.0, "--x-max", help="Maximum x-coordinate after normalization"
+    ),
+    y_min: float = typer.Option(
+        -1.0, "--y-min", help="Minimum y-coordinate after normalization"
+    ),
+    y_max: float = typer.Option(
+        1.0, "--y-max", help="Maximum y-coordinate after normalization"
+    ),
 ):
     """Visualize the normalization process for an InkML file."""
     from hmer.utils.plotting import visualize_ink_normalization
 
     try:
         import matplotlib.pyplot as plt
-        
+
         # Call the visualization function
         fig = visualize_ink_normalization(
             inkml_file=inkml_file,
             output_path=output,
             x_range=(x_min, x_max),
             y_range=(y_min, y_max),
-            show=show
+            show=show,
         )
-        
+
         # Only display message if not showing the plot (to avoid duplicate output)
         if output and not show:
             typer.echo(f"Normalization visualization saved to {output}")
-            
+
         # Close the figure if not showing
         if not show:
             plt.close(fig)
-            
+
     except ImportError as e:
         typer.echo(f"Visualization failed: {e}")
         typer.echo("Required dependencies may be missing. Install with:")
@@ -367,23 +378,20 @@ def visualize_augmentations_command(
 
     try:
         import matplotlib.pyplot as plt
-        
+
         # Call the visualization function
         fig = visualize_augmentations(
-            inkml_file=inkml_file,
-            output_path=output,
-            seed=seed,
-            show=show
+            inkml_file=inkml_file, output_path=output, seed=seed, show=show
         )
-        
+
         # Only display message if not showing the plot (to avoid duplicate output)
         if output and not show:
             typer.echo(f"Augmentation visualization saved to {output}")
-            
+
         # Close the figure if not showing
         if not show:
             plt.close(fig)
-            
+
     except ImportError as e:
         typer.echo(f"Visualization failed: {e}")
         typer.echo("Required dependencies may be missing. Install with:")
@@ -394,21 +402,47 @@ def visualize_augmentations_command(
 
 @app.command("visualize-batch")
 def visualize_batch_command(
-    data_dir: str = typer.Option("data", "--data-dir", "-d", help="Root directory of the dataset"),
-    output_dir: str = typer.Option("outputs/visualizations", "--output-dir", "-o", help="Directory to save visualizations"),
-    split: str = typer.Option("test", "--split", "-s", help="Dataset split to sample from (train, test, valid, etc.)"),
-    num_samples: int = typer.Option(5, "--num-samples", "-n", help="Number of samples to visualize"),
-    include_basic: bool = typer.Option(True, "--basic/--no-basic", help="Include basic visualizations"),
-    include_normalization: bool = typer.Option(True, "--normalization/--no-normalization", help="Include normalization visualizations"),
-    include_augmentation: bool = typer.Option(True, "--augmentation/--no-augmentation", help="Include augmentation visualizations"),
-    seed: Optional[int] = typer.Option(None, "--seed", help="Random seed for reproducibility"),
+    data_dir: str = typer.Option(
+        "data", "--data-dir", "-d", help="Root directory of the dataset"
+    ),
+    output_dir: str = typer.Option(
+        "outputs/visualizations",
+        "--output-dir",
+        "-o",
+        help="Directory to save visualizations",
+    ),
+    split: str = typer.Option(
+        "test",
+        "--split",
+        "-s",
+        help="Dataset split to sample from (train, test, valid, etc.)",
+    ),
+    num_samples: int = typer.Option(
+        5, "--num-samples", "-n", help="Number of samples to visualize"
+    ),
+    include_basic: bool = typer.Option(
+        True, "--basic/--no-basic", help="Include basic visualizations"
+    ),
+    include_normalization: bool = typer.Option(
+        True,
+        "--normalization/--no-normalization",
+        help="Include normalization visualizations",
+    ),
+    include_augmentation: bool = typer.Option(
+        True,
+        "--augmentation/--no-augmentation",
+        help="Include augmentation visualizations",
+    ),
+    seed: Optional[int] = typer.Option(
+        None, "--seed", help="Random seed for reproducibility"
+    ),
 ):
     """Generate visualizations for multiple randomly-selected samples."""
     from hmer.utils.plotting import batch_visualize_samples
-    
+
     try:
         import matplotlib.pyplot as plt
-        
+
         # Create visualization types list
         visualization_types = []
         if include_basic:
@@ -417,16 +451,18 @@ def visualize_batch_command(
             visualization_types.append("normalization")
         if include_augmentation:
             visualization_types.append("augmentation")
-            
+
         if not visualization_types:
             typer.echo("Error: At least one visualization type must be enabled")
             return
-        
+
         # Show summary of what will be generated
-        typer.echo(f"Generating visualizations for {num_samples} samples from '{split}' split")
+        typer.echo(
+            f"Generating visualizations for {num_samples} samples from '{split}' split"
+        )
         typer.echo(f"Visualization types: {', '.join(visualization_types)}")
         typer.echo(f"Output directory: {output_dir}")
-        
+
         # Call the batch visualization function
         batch_visualize_samples(
             data_dir=data_dir,
@@ -434,11 +470,11 @@ def visualize_batch_command(
             split=split,
             num_samples=num_samples,
             visualization_types=visualization_types,
-            seed=seed
+            seed=seed,
         )
-        
+
         typer.echo(f"Visualization generation completed. Files saved to {output_dir}")
-        
+
     except ImportError as e:
         typer.echo(f"Visualization failed: {e}")
         typer.echo("Required dependencies may be missing. Install with:")

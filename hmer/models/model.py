@@ -48,6 +48,7 @@ class HMERModel(nn.Module):
         target_seq: torch.Tensor,
         input_lengths: Optional[torch.Tensor] = None,
         target_lengths: Optional[torch.Tensor] = None,
+        bbox_data: Optional[List] = None,
     ) -> torch.Tensor:
         """
         Forward pass.
@@ -57,12 +58,19 @@ class HMERModel(nn.Module):
             target_seq: Target token IDs [batch_size, target_len]
             input_lengths: Lengths of input sequences
             target_lengths: Lengths of target sequences
+            bbox_data: Optional bounding box data for synthetic samples
 
         Returns:
             Output logits [batch_size, target_len, vocab_size]
         """
         # Encode input sequence
-        memory, src_padding_mask = self.encoder(input_seq, input_lengths)
+        # Pass bounding box data to encoder if available and supported
+        if bbox_data is not None and hasattr(self.encoder, "use_bbox_data"):
+            memory, src_padding_mask = self.encoder(
+                input_seq, input_lengths, bbox_data=bbox_data
+            )
+        else:
+            memory, src_padding_mask = self.encoder(input_seq, input_lengths)
 
         # Prepare masks for decoder
         tgt_padding_mask = None
@@ -104,6 +112,7 @@ class HMERModel(nn.Module):
         max_length: int = 128,
         beam_size: int = 4,
         fast_mode: bool = True,
+        bbox_data: Optional[List] = None,
     ) -> Tuple[List[List[List[int]]], List[List[float]]]:
         """
         Generate sequences using beam search.
@@ -114,6 +123,7 @@ class HMERModel(nn.Module):
             max_length: Maximum sequence length to generate
             beam_size: Beam size for beam search
             fast_mode: Whether to use faster generation mode (recommended for validation)
+            bbox_data: Optional bounding box data for synthetic samples
 
         Returns:
             Tuple of:
@@ -122,7 +132,13 @@ class HMERModel(nn.Module):
         """
         # Encode input sequence
         with torch.no_grad():
-            memory, src_padding_mask = self.encoder(input_seq, input_lengths)
+            # Pass bounding box data to encoder if available and supported
+            if bbox_data is not None and hasattr(self.encoder, "use_bbox_data"):
+                memory, src_padding_mask = self.encoder(
+                    input_seq, input_lengths, bbox_data=bbox_data
+                )
+            else:
+                memory, src_padding_mask = self.encoder(input_seq, input_lengths)
 
             # Get batch size
             batch_size = input_seq.shape[0]
