@@ -331,14 +331,42 @@ def train(
 
         logging.info("Applied MPS-specific optimizations from config")
 
-    # Set up output directory
+    # Set up model directory structure
     if output_dir is None:
-        output_dir = config["output"].get("checkpoint_dir", "outputs/checkpoints")
+        model_dir = config["output"].get("model_dir", "outputs/models")
+        # Create a model name based on configuration
+        model_name = config["output"].get("model_name", None)
+        if model_name is None:
+            # Default model name based on architecture and time
+            encoder_type = config["model"]["encoder"]["type"]
+            decoder_type = config["model"]["decoder"]["type"]
+            model_name = f"{encoder_type}_{decoder_type}"
+            # Add timestamp for uniqueness
+            from datetime import datetime
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            model_name = f"{model_name}_{timestamp}"
+        
+        # Create full model directory
+        output_dir = os.path.join(model_dir, model_name)
+    
+    # Create model subdirectories
     os.makedirs(output_dir, exist_ok=True)
-
+    checkpoint_dir = os.path.join(output_dir, config["output"].get("checkpoint_dir", "checkpoints"))
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    
     # Set up logging
-    log_dir = config["output"].get("log_dir", "outputs/logs")
+    log_dir = os.path.join(output_dir, config["output"].get("log_dir", "logs"))
     os.makedirs(log_dir, exist_ok=True)
+    
+    # Set up metrics directory
+    metrics_dir = os.path.join(output_dir, config["output"].get("metrics_dir", "metrics"))
+    os.makedirs(metrics_dir, exist_ok=True)
+    
+    # Save configuration to model directory
+    import yaml
+    config_path = os.path.join(output_dir, "config.yaml")
+    with open(config_path, "w") as f:
+        yaml.dump(config, f, default_flow_style=False)
 
     logging.basicConfig(
         level=logging.INFO,
@@ -531,7 +559,9 @@ def train(
     if config["output"].get("tensorboard", False):
         from torch.utils.tensorboard import SummaryWriter
 
-        writer = SummaryWriter(log_dir=os.path.join(log_dir, "tensorboard"))
+        tensorboard_dir = os.path.join(log_dir, "tensorboard")
+        os.makedirs(tensorboard_dir, exist_ok=True)
+        writer = SummaryWriter(log_dir=tensorboard_dir)
     else:
         writer = None
 
@@ -539,14 +569,18 @@ def train(
     if config["output"].get("use_wandb", False):
         import wandb
 
-        # Ensure log_dir is defined (it should be from earlier setup)
-        log_dir = config["output"].get("log_dir", "outputs/logs")
-        os.makedirs(log_dir, exist_ok=True)  # Ensure it exists
-
+        # Create a unique run name based on model_name
+        run_name = os.path.basename(output_dir)
+        
+        # Initialize wandb with model directory for runs
+        wandb_dir = os.path.join(output_dir, "wandb")
+        os.makedirs(wandb_dir, exist_ok=True)
+        
         wandb.init(
             project=config["output"].get("project_name", "hmer-ink"),
+            name=run_name,
             config=config,
-            dir=log_dir,  # Specify the directory for wandb runs
+            dir=wandb_dir,  # Use model-specific wandb directory
         )
 
     # Training loop
@@ -626,9 +660,7 @@ def train(
             # Also log to our training monitor 
             if config["output"].get("record_metrics", False):
                 try:
-                    metrics_dir = config["output"].get("metrics_dir", "outputs/training_metrics")
-                    os.makedirs(metrics_dir, exist_ok=True)
-                    
+                    # Use model-specific metrics directory that we created earlier
                     from scripts.training_monitor import capture_training_metrics
 
                     # Create metrics dict with train and val metrics
@@ -636,11 +668,28 @@ def train(
                         "epoch": epoch,
                         "train_loss": train_metrics["loss"],
                         "global_step": epoch * len(train_loader),
+                        "model_name": os.path.basename(output_dir),
                         **{f"val_{k}": v for k, v in val_metrics.items()},
                     }
 
                     # Log to our monitor
                     capture_training_metrics(monitor_metrics, error_examples, metrics_dir)
+                    
+                    # Also run error analysis if we have predictions
+                    if 'all_predictions' in vars() and 'all_targets' in vars() and len(all_predictions) > 0:
+                        try:
+                            from hmer.utils.error_analysis import analyze_errors
+                            error_analysis = analyze_errors(all_predictions, all_targets)
+                            
+                            # Save error analysis to metrics directory
+                            error_analysis_path = os.path.join(metrics_dir, f"error_analysis_epoch_{epoch}.json")
+                            import json
+                            with open(error_analysis_path, "w") as f:
+                                json.dump(error_analysis, f, indent=2)
+                            logging.info(f"Saved error analysis to {error_analysis_path}")
+                        except Exception as e:
+                            logging.warning(f"Error analysis failed: {e}")
+                    
                     logging.info(f"Recorded metrics to {metrics_dir}")
                 except ImportError:
                     logging.info(
@@ -657,23 +706,44 @@ def train(
         # Save model
         if epoch % save_every == 0 or epoch == num_epochs - 1:
             checkpoint_filename = os.path.join(
-                output_dir, f"checkpoint_epoch_{epoch}.pt"
+                checkpoint_dir, f"checkpoint_epoch_{epoch}.pt"
             )
             model.save_checkpoint(
                 checkpoint_filename, epoch, optimizer, scheduler, val_metrics["loss"]
             )
             logging.info(f"Saved checkpoint to {checkpoint_filename}")
 
-        # Check for best model
-        metric_name = "loss"  # We can change this to ERR or another metric
-        current_metric = val_metrics[metric_name]
+        # Check for best model according to monitor_metric
+        metric_name = config["output"].get("monitor_metric", "loss")
+        monitor_mode = config["output"].get("monitor_mode", "min")
+        current_metric = val_metrics.get(metric_name, val_metrics["loss"])
+        
+        # Determine if this is the best model
+        is_best = False
+        if monitor_mode == "min":
+            is_best = current_metric < best_metric
+        else:  # max mode
+            is_best = current_metric > best_metric
 
-        if current_metric < best_metric:
+        if is_best:
             best_metric = current_metric
-            best_checkpoint = os.path.join(output_dir, "best_model.pt")
+            best_checkpoint = os.path.join(checkpoint_dir, "best_model.pt")
             model.save_checkpoint(
                 best_checkpoint, epoch, optimizer, scheduler, best_metric
             )
+            
+            # Also save model metadata
+            best_model_info = {
+                "epoch": epoch,
+                "metric_name": metric_name,
+                "metric_value": float(best_metric),
+                "timestamp": datetime.now().isoformat(),
+                "model_name": os.path.basename(output_dir)
+            }
+            best_model_info_path = os.path.join(output_dir, "best_model_info.json")
+            with open(best_model_info_path, "w") as f:
+                json.dump(best_model_info, f, indent=2)
+                
             logging.info(f"New best model with {metric_name} = {best_metric:.4f}")
             no_improvement = 0
         else:
@@ -693,13 +763,43 @@ def train(
         wandb.finish()
 
     # Load best model for return
-    best_checkpoint = os.path.join(output_dir, "best_model.pt")
+    best_checkpoint = os.path.join(checkpoint_dir, "best_model.pt")
     if os.path.exists(best_checkpoint):
         checkpoint = torch.load(best_checkpoint, map_location=device)
         model.load_state_dict(checkpoint["model"])
         logging.info(
             f"Loaded best model with {metric_name} = {checkpoint.get('best_metric', -1):.4f}"
         )
+        
+    # Generate model summary file
+    model_summary_path = os.path.join(output_dir, "model_summary.md")
+    with open(model_summary_path, "w") as f:
+        f.write(f"# Model Summary: {os.path.basename(output_dir)}\n\n")
+        f.write(f"Created: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+        
+        f.write("## Architecture\n")
+        f.write(f"- Encoder: {config['model']['encoder']['type']}, {config['model']['encoder']['num_layers']} layers\n")
+        f.write(f"- Decoder: {config['model']['decoder']['type']}, {config['model']['decoder']['num_layers']} layers\n")
+        f.write(f"- Embedding Dimension: {config['model']['encoder']['embedding_dim']}\n\n")
+        
+        f.write("## Training\n")
+        f.write(f"- Epochs: {epoch+1}/{num_epochs} (early stopping: {early_stopping})\n")
+        f.write(f"- Batch Size: {batch_size}\n")
+        f.write(f"- Learning Rate: {train_config.get('learning_rate', 'N/A')}\n")
+        f.write(f"- Optimizer: {train_config.get('optimizer', 'N/A')}\n\n")
+        
+        f.write("## Best Performance\n")
+        f.write(f"- Epoch: {checkpoint.get('epoch', 'N/A')}\n")
+        f.write(f"- {metric_name}: {best_metric:.4f}\n")
+        f.write(f"- Validation Loss: {val_metrics.get('loss', 'N/A')}\n")
+        
+        if 'expression_recognition_rate' in val_metrics:
+            f.write(f"- Expression Recognition Rate: {val_metrics['expression_recognition_rate']:.4f}\n")
+            
+        if 'edit_distance' in val_metrics:
+            f.write(f"- Edit Distance: {val_metrics['edit_distance']:.4f}\n")
+    
+    logging.info(f"Generated model summary at {model_summary_path}")
 
     return model
 

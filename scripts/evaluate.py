@@ -31,6 +31,7 @@ def evaluate(
     beam_size: int = 4,
     batch_size: int = 16,
     num_workers: int = 4,
+    save_predictions: bool = True,
 ) -> Dict[str, float]:
     """
     Evaluate a trained HMER model.
@@ -43,6 +44,7 @@ def evaluate(
         beam_size: Beam size for generation
         batch_size: Batch size for evaluation
         num_workers: Number of workers for data loading
+        save_predictions: Whether to save detailed predictions alongside metrics
 
     Returns:
         Dictionary with evaluation metrics
@@ -199,10 +201,25 @@ def evaluate(
                 }
             )
 
+        # Save main results file
         with open(output_path, "w") as f:
             json.dump({"metrics": metrics, "results": detailed_results}, f, indent=2)
-
         logging.info(f"Saved detailed results to {output_path}")
+        
+        # Also run and save error analysis if requested
+        if save_predictions:
+            try:
+                from hmer.utils.error_analysis import analyze_errors
+                error_analysis = analyze_errors(all_predictions, all_targets)
+                
+                # Save error analysis to same directory as main results
+                model_dir = os.path.dirname(output_path)
+                error_analysis_path = os.path.join(model_dir, f"error_analysis_{split}.json")
+                with open(error_analysis_path, "w") as f:
+                    json.dump(error_analysis, f, indent=2)
+                logging.info(f"Saved error analysis to {error_analysis_path}")
+            except Exception as e:
+                logging.warning(f"Error analysis failed: {e}")
 
     return metrics
 

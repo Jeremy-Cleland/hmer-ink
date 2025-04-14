@@ -1,6 +1,6 @@
 # Makefile for HMER-Ink project
 
-.PHONY: clean-pyc clean-outputs clean-all lint lint-fix format typecheck check-all train train-fast evaluate test visualize-training watch-training dashboard expand-model train-expanded
+.PHONY: clean-pyc clean-outputs clean-all fast-clean lint lint-fix format typecheck check-all train train-fast evaluate test visualize-training watch-training dashboard expand-model train-expanded
 
 clean-pyc:
 	find . -name '*.pyc' -exec rm -f {} +
@@ -15,15 +15,11 @@ clean-outputs:
 	@echo "Removing all model runs from outputs directory..."
 	@echo "Removing all experiment directories and registry files..."
 	rm -rf outputs/*
-	@echo "Recreating directory structure..."
-	@mkdir -p outputs/checkpoints
-	@mkdir -p outputs/logs
-	@mkdir -p outputs/registry
-	@echo "{}" > outputs/registry/experiment_registry.json
 	@echo "Outputs directory completely cleaned"
 
 clean-all: clean-pyc clean-outputs
 	@echo "All cleaning operations completed"
+
 
 lint:
 	ruff check .
@@ -87,15 +83,30 @@ train-fast:
 	python cli.py train --config configs/fasttraining.yaml --output-dir outputs/$$EXPERIMENT_NAME
 
 # Evaluate model
-# Usage: make evaluate MODEL=outputs/experiment_name/checkpoints/best_model.pt [CONFIG=configs/custom.yaml] [SPLIT=test]
+# Usage: make evaluate MODEL=path/to/model/checkpoints/best_model.pt [CONFIG=configs/custom.yaml] [SPLIT=test]
 evaluate:
 	@if [ -z "$(MODEL)" ]; then \
-		echo "Error: MODEL parameter is required"; \
-		echo "Usage: make evaluate MODEL=outputs/experiment_name/checkpoints/best_model.pt [CONFIG=configs/custom.yaml] [SPLIT=test]"; \
-		exit 1; \
+		# Try to find the most recent model's best checkpoint \
+		LATEST_MODEL=$$(find outputs/models -mindepth 1 -maxdepth 1 -type d -printf "%T@ %p\n" | sort -nr | head -1 | cut -d' ' -f2); \
+		if [ -n "$$LATEST_MODEL" ] && [ -f "$$LATEST_MODEL/checkpoints/best_model.pt" ]; then \
+			MODEL="$$LATEST_MODEL/checkpoints/best_model.pt"; \
+			echo "Auto-detected latest model at $$MODEL"; \
+		else \
+			echo "Error: MODEL parameter is required"; \
+			echo "Usage: make evaluate MODEL=path/to/model/checkpoints/best_model.pt [CONFIG=configs/custom.yaml] [SPLIT=test]"; \
+			exit 1; \
+		fi; \
 	fi; \
 	if [ -z "$(CONFIG)" ]; then \
-		CONFIG_PATH="configs/default.yaml"; \
+		# Try to use the model's saved config if available \
+		MODEL_DIR=$$(dirname "$(MODEL)"); \
+		MODEL_DIR=$$(dirname "$$MODEL_DIR"); \
+		if [ -f "$$MODEL_DIR/config.yaml" ]; then \
+			CONFIG_PATH="$$MODEL_DIR/config.yaml"; \
+			echo "Using model's saved config at $$CONFIG_PATH"; \
+		else \
+			CONFIG_PATH="configs/default.yaml"; \
+		fi; \
 	else \
 		CONFIG_PATH="$(CONFIG)"; \
 	fi; \
@@ -104,8 +115,13 @@ evaluate:
 	else \
 		SPLIT="$(SPLIT)"; \
 	fi; \
+	# Determine output path \
+	MODEL_DIR=$$(dirname "$(MODEL)"); \
+	MODEL_DIR=$$(dirname "$$MODEL_DIR"); \
+	OUTPUT_PATH="$$MODEL_DIR/evaluation_$$SPLIT.json"; \
 	echo "Evaluating model $(MODEL) on $$SPLIT split using $$CONFIG_PATH"; \
-	python cli.py evaluate --model $(MODEL) --config $$CONFIG_PATH --split $$SPLIT --output outputs/evaluation_$$SPLIT.json
+	echo "Results will be saved to $$OUTPUT_PATH"; \
+	python cli.py evaluate --model $(MODEL) --config $$CONFIG_PATH --split $$SPLIT --output $$OUTPUT_PATH
 
 # Run prediction on a single file
 # Usage: make predict MODEL=path/to/model.pt INPUT=path/to/file.inkml [VISUALIZE=true]
@@ -185,9 +201,17 @@ visualize-training:
 	python cli.py monitor extract --wandb-dir $$WANDB_DIR --output-dir $$OUTPUT_DIR
 
 # Watch training metrics and update visualizations
-# Usage: make watch-training [METRICS_FILE=outputs/training_metrics/training_metrics.json] [REFRESH=300]
+# Usage: make watch-training [METRICS_FILE=path/to/model/metrics/training_metrics.json] [REFRESH=300]
 watch-training:
-	@METRICS_FILE="outputs/training_metrics/training_metrics.json"; \
+	@METRICS_FILE="outputs/models/latest/metrics/training_metrics.json"; \
+	if [ ! -f "$$METRICS_FILE" ]; then \
+		# Look for the most recent model directory if the default file doesn't exist \
+		LATEST_MODEL=$$(find outputs/models -mindepth 1 -maxdepth 1 -type d -printf "%T@ %p\n" | sort -nr | head -1 | cut -d' ' -f2); \
+		if [ -n "$$LATEST_MODEL" ]; then \
+			METRICS_FILE="$$LATEST_MODEL/metrics/training_metrics.json"; \
+			echo "Auto-detected latest model metrics at $$METRICS_FILE"; \
+		fi; \
+	fi; \
 	if [ -n "$(METRICS_FILE)" ]; then \
 		METRICS_FILE=$(METRICS_FILE); \
 	fi; \
@@ -195,19 +219,37 @@ watch-training:
 	if [ -n "$(REFRESH)" ]; then \
 		REFRESH=$(REFRESH); \
 	fi; \
+	if [ ! -f "$$METRICS_FILE" ]; then \
+		echo "Error: Metrics file not found at $$METRICS_FILE"; \
+		echo "Please specify a valid metrics file with METRICS_FILE=path/to/metrics.json"; \
+		exit 1; \
+	fi; \
 	echo "Watching training metrics in $$METRICS_FILE (refreshing every $$REFRESH seconds)"; \
 	python cli.py monitor watch --metrics-file $$METRICS_FILE --refresh $$REFRESH
 
 # Launch interactive training dashboard
-# Usage: make dashboard [METRICS_DIR=outputs/training_metrics] [PORT=8501]
+# Usage: make dashboard [METRICS_DIR=path/to/model/metrics] [PORT=8501]
 dashboard:
-	@METRICS_DIR="outputs/training_metrics"; \
+	@METRICS_DIR="outputs/models/latest/metrics"; \
+	if [ ! -d "$$METRICS_DIR" ]; then \
+		# Look for the most recent model directory if the default doesn't exist \
+		LATEST_MODEL=$$(find outputs/models -mindepth 1 -maxdepth 1 -type d -printf "%T@ %p\n" | sort -nr | head -1 | cut -d' ' -f2); \
+		if [ -n "$$LATEST_MODEL" ]; then \
+			METRICS_DIR="$$LATEST_MODEL/metrics"; \
+			echo "Auto-detected latest model metrics at $$METRICS_DIR"; \
+		fi; \
+	fi; \
 	if [ -n "$(METRICS_DIR)" ]; then \
 		METRICS_DIR=$(METRICS_DIR); \
 	fi; \
 	PORT=8501; \
 	if [ -n "$(PORT)" ]; then \
 		PORT=$(PORT); \
+	fi; \
+	if [ ! -d "$$METRICS_DIR" ]; then \
+		echo "Error: Metrics directory not found at $$METRICS_DIR"; \
+		echo "Please specify a valid metrics directory with METRICS_DIR=path/to/metrics"; \
+		exit 1; \
 	fi; \
 	echo "Launching training dashboard for $$METRICS_DIR on port $$PORT"; \
 	python cli.py monitor dashboard --metrics-dir $$METRICS_DIR --port $$PORT

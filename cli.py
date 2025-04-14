@@ -42,13 +42,39 @@ def train_command(
 
     model = train(config, checkpoint, output_dir)
     
-    # Print location of metrics file if metrics recording is enabled
+    # Print model directory and metrics information
     config_data = train.__globals__["load_config"](config)
+    # Get model directory from output_dir if provided, or from model structure
+    if output_dir:
+        model_dir = output_dir
+    else:
+        model_base_dir = config_data["output"].get("model_dir", "outputs/models")
+        # Detect most recently created model directory
+        import glob
+        model_dirs = glob.glob(f"{model_base_dir}/*")
+        if model_dirs:
+            # Sort by creation time, most recent first
+            model_dirs.sort(key=os.path.getctime, reverse=True)
+            model_dir = model_dirs[0]
+        else:
+            model_dir = model_base_dir
+    
+    # Print model directory
+    typer.echo(f"\nModel saved to: {model_dir}")
+    
+    # Print metrics information if enabled
     if config_data["output"].get("record_metrics", False):
-        metrics_dir = config_data["output"].get("metrics_dir", "outputs/training_metrics")
+        metrics_dir = os.path.join(model_dir, config_data["output"].get("metrics_dir", "metrics"))
         metrics_file = os.path.join(metrics_dir, "training_metrics.json")
-        typer.echo(f"Training metrics recorded to {metrics_file}")
-        typer.echo(f"Use 'make watch-training' or 'make dashboard' to view metrics")
+        typer.echo(f"Training metrics recorded to: {metrics_dir}")
+        
+        # Check if a model summary exists
+        summary_path = os.path.join(model_dir, "model_summary.md")
+        if os.path.exists(summary_path):
+            typer.echo(f"Model summary available at: {summary_path}")
+        
+        typer.echo(f"To monitor training: make watch-training METRICS_FILE={metrics_file}")
+        typer.echo(f"To view dashboard: make dashboard METRICS_DIR={metrics_dir}")
 
     typer.echo("Training completed")
 
