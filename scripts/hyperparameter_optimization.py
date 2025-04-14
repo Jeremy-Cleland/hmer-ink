@@ -2,7 +2,6 @@
 Hyperparameter optimization script using Weights & Biases Sweep.
 """
 
-import argparse
 import os
 import sys
 
@@ -106,25 +105,20 @@ def run_sweep(config_path: str, experiment_name: str, num_runs: int = 10):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Run hyperparameter optimization using W&B Sweeps"
-    )
-    parser.add_argument(
-        "--config",
-        type=str,
-        default="configs/default.yaml",
-        help="Path to base configuration file",
-    )
-    parser.add_argument(
-        "--experiment",
-        type=str,
-        default="hpo-hmer-ink",
-        help="Name for the sweep experiment",
-    )
-    parser.add_argument(
-        "--num-runs", type=int, default=10, help="Number of runs to perform"
-    )
-
-    args = parser.parse_args()
-
-    run_sweep(args.config, args.experiment, args.num_runs)
+    import typer
+    
+    def main(
+        config: str = typer.Option(
+            "configs/default.yaml", "--config", "-c", help="Path to base configuration file"
+        ),
+        experiment: str = typer.Option(
+            "hpo-hmer-ink", "--experiment", "-e", help="Name for the sweep experiment"
+        ),
+        num_runs: int = typer.Option(
+            10, "--num-runs", "-n", help="Number of runs to perform"
+        ),
+    ):
+        """Run hyperparameter optimization using W&B Sweeps."""
+        run_sweep(config, experiment, num_runs)
+    
+    typer.run(main)

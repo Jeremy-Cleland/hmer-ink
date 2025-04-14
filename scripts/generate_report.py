@@ -2,7 +2,6 @@
 Generate a comprehensive report of model performance and visualizations.
 """
 
-import argparse
 import json
 import os
 import random
@@ -554,31 +553,21 @@ def generate_report(
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Generate a comprehensive HTML report for model evaluation"
-    )
-    parser.add_argument(
-        "--model", type=str, required=True, help="Path to model checkpoint"
-    )
-    parser.add_argument(
-        "--config",
-        type=str,
-        default="configs/default.yaml",
-        help="Path to configuration file",
-    )
-    parser.add_argument(
-        "--output",
-        type=str,
-        default="outputs/report.html",
-        help="Path to save report HTML",
-    )
-    parser.add_argument(
-        "--samples",
-        type=int,
-        default=20,
-        help="Number of random samples to include in report",
-    )
-
-    args = parser.parse_args()
-
-    generate_report(args.model, args.config, args.output, args.samples)
+    import typer
+    
+    def main(
+        model: str = typer.Argument(..., help="Path to model checkpoint"),
+        config: str = typer.Option(
+            "configs/default.yaml", "--config", "-c", help="Path to configuration file"
+        ),
+        output: str = typer.Option(
+            "outputs/report.html", "--output", "-o", help="Path to save report HTML"
+        ),
+        samples: int = typer.Option(
+            20, "--samples", "-s", help="Number of random samples to include in report"
+        ),
+    ):
+        """Generate a comprehensive HTML report for model evaluation."""
+        generate_report(model, config, output, samples)
+    
+    typer.run(main)

@@ -208,33 +208,17 @@ def evaluate(
 
 
 if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(description="Evaluate HMER-Ink model")
-    parser.add_argument(
-        "--model", type=str, required=True, help="Path to model checkpoint"
-    )
-    parser.add_argument(
-        "--config", type=str, required=True, help="Path to configuration file"
-    )
-    parser.add_argument("--output", type=str, help="Path to save evaluation results")
-    parser.add_argument(
-        "--split", type=str, default="test", help="Data split to evaluate on"
-    )
-    parser.add_argument(
-        "--beam_size", type=int, default=4, help="Beam size for generation"
-    )
-    parser.add_argument(
-        "--batch_size", type=int, default=16, help="Batch size for evaluation"
-    )
-
-    args = parser.parse_args()
-
-    evaluate(
-        args.model,
-        args.config,
-        args.output,
-        args.split,
-        args.beam_size,
-        args.batch_size,
-    )
+    import typer
+    
+    def main(
+        model: str = typer.Argument(..., help="Path to model checkpoint"),
+        config: str = typer.Argument(..., help="Path to configuration file"),
+        output: Optional[str] = typer.Option(None, "--output", "-o", help="Path to save evaluation results"),
+        split: str = typer.Option("test", "--split", "-s", help="Data split to evaluate on"),
+        beam_size: int = typer.Option(4, "--beam-size", "-b", help="Beam size for generation"),
+        batch_size: int = typer.Option(16, "--batch-size", help="Batch size for evaluation"),
+    ):
+        """Evaluate HMER-Ink model."""
+        evaluate(model, config, output, split, beam_size, batch_size)
+    
+    typer.run(main)

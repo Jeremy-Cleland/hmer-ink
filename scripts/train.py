@@ -703,17 +703,14 @@ def train(
 
 
 if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(description="Train HMER-Ink model")
-    parser.add_argument(
-        "--config", type=str, required=True, help="Path to configuration file"
-    )
-    parser.add_argument(
-        "--checkpoint", type=str, help="Path to checkpoint for resuming training"
-    )
-    parser.add_argument("--output_dir", type=str, help="Directory to save outputs")
-
-    args = parser.parse_args()
-
-    train(args.config, args.checkpoint, args.output_dir)
+    import typer
+    
+    def main(
+        config: str = typer.Argument(..., help="Path to configuration file"),
+        checkpoint: Optional[str] = typer.Option(None, help="Path to checkpoint for resuming training"),
+        output_dir: Optional[str] = typer.Option(None, help="Directory to save outputs"),
+    ):
+        """Train HMER-Ink model."""
+        train(config, checkpoint, output_dir)
+    
+    typer.run(main)

@@ -326,31 +326,30 @@ def dashboard_command(
     try:
         import streamlit.web.cli as stcli
         import sys
-        import os
+        from scripts.training_monitor import create_dashboard
 
-        # Change to the directory of the script
-        os.chdir(os.path.dirname(os.path.abspath(__file__)))
+        # Create or update the dashboard script
+        dashboard_path = create_dashboard()
         
-        # Path to the dashboard script
-        dashboard_path = os.path.join("scripts", "dashboard.py")
+        # Launch the dashboard with streamlit
+        typer.echo(f"Launching dashboard for {metrics_dir} on port {port}")
+        typer.echo("Press Ctrl+C to stop the dashboard")
         
-        # Check if dashboard script exists, if not create it
-        if not os.path.exists(dashboard_path):
-            from scripts.training_monitor import create_dashboard
-            create_dashboard()
-        
-        # Launch the dashboard
+        # We need to set sys.argv for streamlit
         sys.argv = [
             "streamlit", 
             "run", 
             dashboard_path,
-            "--",  # Arguments after this go to the script
-            "--metrics_dir", metrics_dir
+            "--server.port", str(port),
+            "--",  # Arguments after this go to the dashboard script
+            "--metrics-dir", metrics_dir
         ]
+        
+        # Run streamlit
         sys.exit(stcli.main())
     except ImportError:
-        typer.echo("Streamlit is required to run the dashboard. Install with: pip install streamlit")
-        typer.echo("Then run: pip install altair")
+        typer.echo("Required dependencies not found. Install with:")
+        typer.echo("  pip install streamlit altair")
         sys.exit(1)
 
 
