@@ -554,7 +554,7 @@ def generate_report(
 
 if __name__ == "__main__":
     import typer
-    
+
     def main(
         model: str = typer.Argument(..., help="Path to model checkpoint"),
         config: str = typer.Option(
@@ -569,5 +569,5 @@ if __name__ == "__main__":
     ):
         """Generate a comprehensive HTML report for model evaluation."""
         generate_report(model, config, output, samples)
-    
+
     typer.run(main)

@@ -13,7 +13,9 @@ app = typer.Typer(help="HMER-Ink: Handwritten Mathematical Expression Recognitio
 monitor_app = typer.Typer(help="Monitor training metrics")
 
 # Register subcommands
-app.add_typer(monitor_app, name="monitor", help="Monitor and visualize training metrics")
+app.add_typer(
+    monitor_app, name="monitor", help="Monitor and visualize training metrics"
+)
 
 # Add import path
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
@@ -40,8 +42,8 @@ def train_command(
     if output_dir:
         typer.echo(f"Saving outputs to {output_dir}")
 
-    model = train(config, checkpoint, output_dir)
-    
+    train(config, checkpoint, output_dir)
+
     # Print model directory and metrics information
     config_data = train.__globals__["load_config"](config)
     # Get model directory from output_dir if provided, or from model structure
@@ -51,6 +53,7 @@ def train_command(
         model_base_dir = config_data["output"].get("model_dir", "outputs/models")
         # Detect most recently created model directory
         import glob
+
         model_dirs = glob.glob(f"{model_base_dir}/*")
         if model_dirs:
             # Sort by creation time, most recent first
@@ -58,22 +61,26 @@ def train_command(
             model_dir = model_dirs[0]
         else:
             model_dir = model_base_dir
-    
+
     # Print model directory
     typer.echo(f"\nModel saved to: {model_dir}")
-    
+
     # Print metrics information if enabled
     if config_data["output"].get("record_metrics", False):
-        metrics_dir = os.path.join(model_dir, config_data["output"].get("metrics_dir", "metrics"))
+        metrics_dir = os.path.join(
+            model_dir, config_data["output"].get("metrics_dir", "metrics")
+        )
         metrics_file = os.path.join(metrics_dir, "training_metrics.json")
         typer.echo(f"Training metrics recorded to: {metrics_dir}")
-        
+
         # Check if a model summary exists
         summary_path = os.path.join(model_dir, "model_summary.md")
         if os.path.exists(summary_path):
             typer.echo(f"Model summary available at: {summary_path}")
-        
-        typer.echo(f"To monitor training: make watch-training METRICS_FILE={metrics_file}")
+
+        typer.echo(
+            f"To monitor training: make watch-training METRICS_FILE={metrics_file}"
+        )
         typer.echo(f"To view dashboard: make dashboard METRICS_DIR={metrics_dir}")
 
     typer.echo("Training completed")
@@ -366,21 +373,23 @@ def dashboard_command(
 
         # Create or update the dashboard script
         dashboard_path = create_dashboard()
-        
+
         # Launch the dashboard with streamlit
         typer.echo(f"Launching dashboard for {metrics_dir} on port {port}")
         typer.echo("Press Ctrl+C to stop the dashboard")
-        
+
         # We need to set sys.argv for streamlit
         sys.argv = [
-            "streamlit", 
-            "run", 
+            "streamlit",
+            "run",
             dashboard_path,
-            "--server.port", str(port),
+            "--server.port",
+            str(port),
             "--",  # Arguments after this go to the dashboard script
-            "--metrics-dir", metrics_dir
+            "--metrics-dir",
+            metrics_dir,
         ]
-        
+
         # Run streamlit
         sys.exit(stcli.main())
     except ImportError:

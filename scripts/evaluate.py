@@ -205,16 +205,19 @@ def evaluate(
         with open(output_path, "w") as f:
             json.dump({"metrics": metrics, "results": detailed_results}, f, indent=2)
         logging.info(f"Saved detailed results to {output_path}")
-        
+
         # Also run and save error analysis if requested
         if save_predictions:
             try:
                 from hmer.utils.error_analysis import analyze_errors
+
                 error_analysis = analyze_errors(all_predictions, all_targets)
-                
+
                 # Save error analysis to same directory as main results
                 model_dir = os.path.dirname(output_path)
-                error_analysis_path = os.path.join(model_dir, f"error_analysis_{split}.json")
+                error_analysis_path = os.path.join(
+                    model_dir, f"error_analysis_{split}.json"
+                )
                 with open(error_analysis_path, "w") as f:
                     json.dump(error_analysis, f, indent=2)
                 logging.info(f"Saved error analysis to {error_analysis_path}")
@@ -226,16 +229,24 @@ def evaluate(
 
 if __name__ == "__main__":
     import typer
-    
+
     def main(
         model: str = typer.Argument(..., help="Path to model checkpoint"),
         config: str = typer.Argument(..., help="Path to configuration file"),
-        output: Optional[str] = typer.Option(None, "--output", "-o", help="Path to save evaluation results"),
-        split: str = typer.Option("test", "--split", "-s", help="Data split to evaluate on"),
-        beam_size: int = typer.Option(4, "--beam-size", "-b", help="Beam size for generation"),
-        batch_size: int = typer.Option(16, "--batch-size", help="Batch size for evaluation"),
+        output: Optional[str] = typer.Option(
+            None, "--output", "-o", help="Path to save evaluation results"
+        ),
+        split: str = typer.Option(
+            "test", "--split", "-s", help="Data split to evaluate on"
+        ),
+        beam_size: int = typer.Option(
+            4, "--beam-size", "-b", help="Beam size for generation"
+        ),
+        batch_size: int = typer.Option(
+            16, "--batch-size", help="Batch size for evaluation"
+        ),
     ):
         """Evaluate HMER-Ink model."""
         evaluate(model, config, output, split, beam_size, batch_size)
-    
+
     typer.run(main)

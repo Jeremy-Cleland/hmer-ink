@@ -106,10 +106,13 @@ def run_sweep(config_path: str, experiment_name: str, num_runs: int = 10):
 
 if __name__ == "__main__":
     import typer
-    
+
     def main(
         config: str = typer.Option(
-            "configs/default.yaml", "--config", "-c", help="Path to base configuration file"
+            "configs/default.yaml",
+            "--config",
+            "-c",
+            help="Path to base configuration file",
         ),
         experiment: str = typer.Option(
             "hpo-hmer-ink", "--experiment", "-e", help="Name for the sweep experiment"
@@ -120,5 +123,5 @@ if __name__ == "__main__":
     ):
         """Run hyperparameter optimization using W&B Sweeps."""
         run_sweep(config, experiment, num_runs)
-    
+
     typer.run(main)

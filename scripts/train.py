@@ -343,27 +343,33 @@ def train(
             model_name = f"{encoder_type}_{decoder_type}"
             # Add timestamp for uniqueness
             from datetime import datetime
+
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             model_name = f"{model_name}_{timestamp}"
-        
+
         # Create full model directory
         output_dir = os.path.join(model_dir, model_name)
-    
+
     # Create model subdirectories
     os.makedirs(output_dir, exist_ok=True)
-    checkpoint_dir = os.path.join(output_dir, config["output"].get("checkpoint_dir", "checkpoints"))
+    checkpoint_dir = os.path.join(
+        output_dir, config["output"].get("checkpoint_dir", "checkpoints")
+    )
     os.makedirs(checkpoint_dir, exist_ok=True)
-    
+
     # Set up logging
     log_dir = os.path.join(output_dir, config["output"].get("log_dir", "logs"))
     os.makedirs(log_dir, exist_ok=True)
-    
+
     # Set up metrics directory
-    metrics_dir = os.path.join(output_dir, config["output"].get("metrics_dir", "metrics"))
+    metrics_dir = os.path.join(
+        output_dir, config["output"].get("metrics_dir", "metrics")
+    )
     os.makedirs(metrics_dir, exist_ok=True)
-    
+
     # Save configuration to model directory
     import yaml
+
     config_path = os.path.join(output_dir, "config.yaml")
     with open(config_path, "w") as f:
         yaml.dump(config, f, default_flow_style=False)
@@ -571,11 +577,11 @@ def train(
 
         # Create a unique run name based on model_name
         run_name = os.path.basename(output_dir)
-        
+
         # Initialize wandb with model directory for runs
         wandb_dir = os.path.join(output_dir, "wandb")
         os.makedirs(wandb_dir, exist_ok=True)
-        
+
         wandb.init(
             project=config["output"].get("project_name", "hmer-ink"),
             name=run_name,
@@ -638,15 +644,53 @@ def train(
 
             # Only proceed if validation was actually performed
             if hasattr(val_metrics, "get") and val_metrics.get("num_samples", 0) > 0:
-                        # Try to get a few error examples from the validation run
-                if 'all_predictions' in vars() and 'all_targets' in vars() and len(all_predictions) > 0:
-                    num_examples = min(5, len(all_predictions))
+                # Get sample predictions and targets for error examples
+                try:
+                    # Get a small sample for error examples (limit to one batch)
+                    sample_predictions = []
+                    sample_targets = []
+
+                    # Use the first batch from validation data as a sample
+                    first_batch = next(iter(valid_loader))
+                    batch_targets = first_batch["labels"]
+
+                    # Generate predictions for this sample
+                    input_seq = first_batch["input"].to(device)
+                    input_lengths = first_batch["input_lengths"].to(device)
+
+                    with torch.no_grad():
+                        beam_results, _ = model.generate(
+                            input_seq,
+                            input_lengths,
+                            max_length=64,
+                            beam_size=2,
+                            fast_mode=True,
+                        )
+
+                        # Decode predictions
+                        for beams in beam_results:
+                            # Take the top beam result
+                            top_beam = beams[0]
+                            prediction = tokenizer.decode(
+                                top_beam, skip_special_tokens=True
+                            )
+                            sample_predictions.append(prediction)
+
+                    # Add targets
+                    sample_targets.extend(batch_targets)
+
+                    # Create error examples
+                    num_examples = min(5, len(sample_predictions))
                     for i in range(num_examples):
-                        error_examples.append({
-                            "prediction": all_predictions[i],
-                            "target": all_targets[i],
-                            "cer": val_metrics.get("edit_distance", 0)
-                        })
+                        error_examples.append(
+                            {
+                                "prediction": sample_predictions[i],
+                                "target": sample_targets[i],
+                                "cer": val_metrics.get("edit_distance", 0),
+                            }
+                        )
+                except Exception as e:
+                    logging.warning(f"Error creating error examples: {e}")
 
             # Log to wandb
             wandb.log(
@@ -657,7 +701,7 @@ def train(
                 }
             )
 
-            # Also log to our training monitor 
+            # Also log to our training monitor
             if config["output"].get("record_metrics", False):
                 try:
                     # Use model-specific metrics directory that we created earlier
@@ -673,23 +717,72 @@ def train(
                     }
 
                     # Log to our monitor
-                    capture_training_metrics(monitor_metrics, error_examples, metrics_dir)
-                    
-                    # Also run error analysis if we have predictions
-                    if 'all_predictions' in vars() and 'all_targets' in vars() and len(all_predictions) > 0:
-                        try:
+                    capture_training_metrics(
+                        monitor_metrics, error_examples, metrics_dir
+                    )
+
+                    # Get predictions from validation results
+                    try:
+                        # Extract predictions and targets from validation
+                        predictions = []
+                        targets = []
+
+                        for batch_idx, batch in enumerate(valid_loader):
+                            if (
+                                batch_idx >= 5
+                            ):  # Limit to first few batches for analysis
+                                break
+
+                            # Extract targets from batch
+                            batch_targets = batch["labels"]
+
+                            # Generate predictions for this batch
+                            input_seq = batch["input"].to(device)
+                            input_lengths = batch["input_lengths"].to(device)
+
+                            with torch.no_grad():
+                                beam_results, _ = model.generate(
+                                    input_seq,
+                                    input_lengths,
+                                    max_length=64,  # Shorter for efficiency
+                                    beam_size=2,  # Small beam for speed
+                                    fast_mode=True,
+                                )
+
+                                # Decode predictions
+                                batch_predictions = []
+                                for beams in beam_results:
+                                    # Take the top beam result (best prediction)
+                                    top_beam = beams[0]
+                                    prediction = tokenizer.decode(
+                                        top_beam, skip_special_tokens=True
+                                    )
+                                    batch_predictions.append(prediction)
+
+                            # Add to lists
+                            predictions.extend(batch_predictions)
+                            targets.extend(batch_targets)
+
+                        # Run error analysis on the collected predictions
+                        if len(predictions) > 0:
                             from hmer.utils.error_analysis import analyze_errors
-                            error_analysis = analyze_errors(all_predictions, all_targets)
-                            
+
+                            error_analysis = analyze_errors(predictions, targets)
+
                             # Save error analysis to metrics directory
-                            error_analysis_path = os.path.join(metrics_dir, f"error_analysis_epoch_{epoch}.json")
+                            error_analysis_path = os.path.join(
+                                metrics_dir, f"error_analysis_epoch_{epoch}.json"
+                            )
                             import json
+
                             with open(error_analysis_path, "w") as f:
                                 json.dump(error_analysis, f, indent=2)
-                            logging.info(f"Saved error analysis to {error_analysis_path}")
-                        except Exception as e:
-                            logging.warning(f"Error analysis failed: {e}")
-                    
+                            logging.info(
+                                f"Saved error analysis to {error_analysis_path}"
+                            )
+                    except Exception as e:
+                        logging.warning(f"Error analysis failed: {e}")
+
                     logging.info(f"Recorded metrics to {metrics_dir}")
                 except ImportError:
                     logging.info(
@@ -717,7 +810,7 @@ def train(
         metric_name = config["output"].get("monitor_metric", "loss")
         monitor_mode = config["output"].get("monitor_mode", "min")
         current_metric = val_metrics.get(metric_name, val_metrics["loss"])
-        
+
         # Determine if this is the best model
         is_best = False
         if monitor_mode == "min":
@@ -731,19 +824,19 @@ def train(
             model.save_checkpoint(
                 best_checkpoint, epoch, optimizer, scheduler, best_metric
             )
-            
+
             # Also save model metadata
             best_model_info = {
                 "epoch": epoch,
                 "metric_name": metric_name,
                 "metric_value": float(best_metric),
                 "timestamp": datetime.now().isoformat(),
-                "model_name": os.path.basename(output_dir)
+                "model_name": os.path.basename(output_dir),
             }
             best_model_info_path = os.path.join(output_dir, "best_model_info.json")
             with open(best_model_info_path, "w") as f:
                 json.dump(best_model_info, f, indent=2)
-                
+
             logging.info(f"New best model with {metric_name} = {best_metric:.4f}")
             no_improvement = 0
         else:
@@ -770,35 +863,45 @@ def train(
         logging.info(
             f"Loaded best model with {metric_name} = {checkpoint.get('best_metric', -1):.4f}"
         )
-        
+
     # Generate model summary file
     model_summary_path = os.path.join(output_dir, "model_summary.md")
     with open(model_summary_path, "w") as f:
         f.write(f"# Model Summary: {os.path.basename(output_dir)}\n\n")
         f.write(f"Created: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
-        
+
         f.write("## Architecture\n")
-        f.write(f"- Encoder: {config['model']['encoder']['type']}, {config['model']['encoder']['num_layers']} layers\n")
-        f.write(f"- Decoder: {config['model']['decoder']['type']}, {config['model']['decoder']['num_layers']} layers\n")
-        f.write(f"- Embedding Dimension: {config['model']['encoder']['embedding_dim']}\n\n")
-        
+        f.write(
+            f"- Encoder: {config['model']['encoder']['type']}, {config['model']['encoder']['num_layers']} layers\n"
+        )
+        f.write(
+            f"- Decoder: {config['model']['decoder']['type']}, {config['model']['decoder']['num_layers']} layers\n"
+        )
+        f.write(
+            f"- Embedding Dimension: {config['model']['encoder']['embedding_dim']}\n\n"
+        )
+
         f.write("## Training\n")
-        f.write(f"- Epochs: {epoch+1}/{num_epochs} (early stopping: {early_stopping})\n")
+        f.write(
+            f"- Epochs: {epoch + 1}/{num_epochs} (early stopping: {early_stopping})\n"
+        )
         f.write(f"- Batch Size: {batch_size}\n")
         f.write(f"- Learning Rate: {train_config.get('learning_rate', 'N/A')}\n")
         f.write(f"- Optimizer: {train_config.get('optimizer', 'N/A')}\n\n")
-        
+
         f.write("## Best Performance\n")
         f.write(f"- Epoch: {checkpoint.get('epoch', 'N/A')}\n")
         f.write(f"- {metric_name}: {best_metric:.4f}\n")
         f.write(f"- Validation Loss: {val_metrics.get('loss', 'N/A')}\n")
-        
-        if 'expression_recognition_rate' in val_metrics:
-            f.write(f"- Expression Recognition Rate: {val_metrics['expression_recognition_rate']:.4f}\n")
-            
-        if 'edit_distance' in val_metrics:
+
+        if "expression_recognition_rate" in val_metrics:
+            f.write(
+                f"- Expression Recognition Rate: {val_metrics['expression_recognition_rate']:.4f}\n"
+            )
+
+        if "edit_distance" in val_metrics:
             f.write(f"- Edit Distance: {val_metrics['edit_distance']:.4f}\n")
-    
+
     logging.info(f"Generated model summary at {model_summary_path}")
 
     return model
@@ -806,13 +909,17 @@ def train(
 
 if __name__ == "__main__":
     import typer
-    
+
     def main(
         config: str = typer.Argument(..., help="Path to configuration file"),
-        checkpoint: Optional[str] = typer.Option(None, help="Path to checkpoint for resuming training"),
-        output_dir: Optional[str] = typer.Option(None, help="Directory to save outputs"),
+        checkpoint: Optional[str] = typer.Option(
+            None, help="Path to checkpoint for resuming training"
+        ),
+        output_dir: Optional[str] = typer.Option(
+            None, help="Directory to save outputs"
+        ),
     ):
         """Train HMER-Ink model."""
         train(config, checkpoint, output_dir)
-    
+
     typer.run(main)

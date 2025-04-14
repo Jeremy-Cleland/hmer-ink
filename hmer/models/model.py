@@ -332,10 +332,19 @@ class HMERModel(nn.Module):
                     # Validate indices are in bounds
                     if i >= next_tokens.size(0) or i >= actual_batch_size:
                         # Handle out of bounds - just keep current sequence and mark as finished
-                        new_sequences.append(sequences[min(i, sequences.size(0)-1) : min(i, sequences.size(0)-1) + 1])
+                        new_sequences.append(
+                            sequences[
+                                min(i, sequences.size(0) - 1) : min(
+                                    i, sequences.size(0) - 1
+                                )
+                                + 1
+                            ]
+                        )
                         is_finished[i] = True
                         if i < actual_batch_size:
-                            all_beams[i] = [sequences[min(i, sequences.size(0)-1)].tolist()]
+                            all_beams[i] = [
+                                sequences[min(i, sequences.size(0) - 1)].tolist()
+                            ]
                             all_scores[i] = [0.0]
                         continue
 
@@ -412,7 +421,11 @@ class HMERModel(nn.Module):
 
             # For beam_size=2, fill second beam with best alternative
             if beam_size == 2:
-                if len(all_beams[i]) < 2 and i < len(beam_sequences) and beam_sequences[i]:
+                if (
+                    len(all_beams[i]) < 2
+                    and i < len(beam_sequences)
+                    and beam_sequences[i]
+                ):
                     # Add the best alternative sequence
                     all_beams[i].append(
                         beam_sequences[i][1]

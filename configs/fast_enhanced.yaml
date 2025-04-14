@@ -1,65 +1,66 @@
 # Enhanced Fast Training Configuration for HMER-Ink
+# Balanced for better performance without excessive compute cost (<25% additional compute vs fast.yaml)
 
 # Data settings
 data:
   data_dir: "data"
-  train_dirs: ["train"]  # Use only main training data
+  train_dirs: ["train", "symbols"]  # Add symbols dataset but skip synthetic
   valid_dir: "valid"
   test_dir: "test"
-  max_seq_length: 384  # Reduced
-  max_token_length: 192  # Reduced
-  use_synthetic: false  # Skip synthetic data for faster training
+  max_seq_length: 384  # Same as fast config
+  max_token_length: 224  # Slightly increased for better sequence modeling
+  use_synthetic: false  # Still skip synthetic data for faster training
   normalization:
     x_range: [-1, 1]
     y_range: [-1, 1]
     time_range: [0, 1]
   augmentation:
     enabled: true
-    scale_range: [0.8, 1.2]  # Less aggressive scaling
-    rotation_range: [-10, 10]  # Less rotation
-    translation_range: [-0.1, 0.1]
+    scale_range: [0.75, 1.25]  # Slightly more aggressive scaling
+    rotation_range: [-15, 15]  # Increased rotation range
+    translation_range: [-0.125, 0.125]  # Increased translation
     stroke_dropout_prob: 0.05
     jitter_scale: 0.01
-    stroke_thickness_range: [1.0, 2.0]
+    stroke_thickness_range: [1.0, 2.25]
 
-# Model architecture (lighter)
+# Model architecture (balanced)
 model:
   name: "transformer_encoder_decoder"
   encoder:
     type: "transformer"
     input_dim: 4  # x, y, t, pen_state
-    embedding_dim: 256  # Reduced
-    num_layers: 3  # Fewer layers
+    embedding_dim: 320  # Increased from 256 for better representation
+    num_layers: 4  # One more layer than fast config
     num_heads: 8
-    dropout: 0.1
+    dropout: 0.15  # Slightly increased for better generalization
     position_encoding: "sinusoidal"
   decoder:
     type: "transformer"
-    embedding_dim: 256  # Reduced
-    num_layers: 3  # Fewer layers
+    embedding_dim: 320  # Matching encoder
+    num_layers: 4  # One more layer than fast config
     num_heads: 8
-    dropout: 0.1
-    max_length: 192
+    dropout: 0.15
+    max_length: 224  # Match token length
 
-# Training settings - optimized for speed
+# Training settings - balanced optimization
 training:
-  batch_size: 64  # Original batch size for faster training
-  learning_rate: 0.0005  # Slightly higher for faster convergence
+  batch_size: 48  # Slightly reduced from fast config
+  learning_rate: 0.0004  # Adjusted learning rate
   weight_decay: 0.0001
-  num_epochs: 50  # Fewer epochs
-  early_stopping_patience: 8  # Increased patience to ensure convergence
+  num_epochs: 80  # More epochs than fast config
+  early_stopping_patience: 10  # More patience for better convergence
   lr_scheduler:
     type: "reduce_on_plateau"
     factor: 0.5
-    patience: 2  # Quicker LR reduction
+    patience: 3  # Slightly more patience than fast config
     threshold: 0.001
   optimizer: "adamw"
   use_amp: true  # Mixed precision for faster training
   device: "mps"  # For Apple Silicon
   num_workers: 4
-  gradient_accumulation_steps: 8 # Original steps
-  save_every_n_epochs: 1  # Save more frequently
-  validate_every_n_steps: 3000  # Validate more frequently
+  gradient_accumulation_steps: 8 
+  save_every_n_epochs: 2
+  validate_every_n_steps: 1500  # Validate more often than fast config
   clip_grad_norm: 1.0
 
 # MPS specific optimizations
@@ -77,19 +78,20 @@ evaluation:
   batch_size: 32
   device: "mps"
   metrics: ["edit_distance", "character_error_rate", "expression_recognition_rate", "symbol_accuracy", "token_error_rate"]
-  beam_size: 3  # Increased for better evaluation
-  # Include detailed error examples for better monitoring
-  num_error_examples: 10
+  beam_size: 4  # Increased beam size for better accuracy
+  num_error_examples: 15
 
 # Outputs
 output:
-  checkpoint_dir: "outputs/checkpoints"
-  log_dir: "outputs/logs"
+  model_dir: "outputs/models"  # Base directory for all model files
+  checkpoint_dir: "checkpoints"  # Relative to model_dir
+  log_dir: "logs"  # Relative to model_dir
+  metrics_dir: "metrics"  # Relative to model_dir
+  
   use_wandb: true  # Enable Weights & Biases for tracking progress
-  project_name: "hmer-ink-fast"
+  project_name: "hmer-ink-fast-enhanced"  # Distinct project name
   tensorboard: false  # Disable tensorboard
-  save_best_k: 2  # Save more best models
+  save_best_k: 2  # Save top 2 models
   monitor_metric: "expression_recognition_rate"
   monitor_mode: "max"  # Higher is better for ERR
   record_metrics: true  # Automatically save metrics to JSON for monitoring
-  metrics_dir: "outputs/training_metrics"

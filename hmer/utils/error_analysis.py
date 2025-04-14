@@ -43,23 +43,25 @@ def analyze_errors(
         exact_matches += is_match
 
         # Check for specific LaTeX structure errors
-        error_details.append({
-            "index": i,
-            "image_path": path,
-            "prediction": pred,
-            "reference": ref,
-            "edit_distance": edit_distance,
-            "normalized_edit_distance": normalized_edit_distance,
-            "is_match": is_match,
-            "pred_len": len(pred_tokens),
-            "ref_len": len(ref_tokens),
-            "len_diff": len(pred_tokens) - len(ref_tokens),
-            "braces_balanced": check_balanced_delimiters(pred),
-            "has_frac": 1 if "\\frac" in ref else 0,
-            "pred_has_frac": 1 if "\\frac" in pred else 0,
-            "has_sqrt": 1 if "\\sqrt" in ref else 0,
-            "pred_has_sqrt": 1 if "\\sqrt" in pred else 0,
-        })
+        error_details.append(
+            {
+                "index": i,
+                "image_path": path,
+                "prediction": pred,
+                "reference": ref,
+                "edit_distance": edit_distance,
+                "normalized_edit_distance": normalized_edit_distance,
+                "is_match": is_match,
+                "pred_len": len(pred_tokens),
+                "ref_len": len(ref_tokens),
+                "len_diff": len(pred_tokens) - len(ref_tokens),
+                "braces_balanced": check_balanced_delimiters(pred),
+                "has_frac": 1 if "\\frac" in ref else 0,
+                "pred_has_frac": 1 if "\\frac" in pred else 0,
+                "has_sqrt": 1 if "\\sqrt" in ref else 0,
+                "pred_has_sqrt": 1 if "\\sqrt" in pred else 0,
+            }
+        )
 
     # Aggregate Analysis
     avg_cer = sum(cer_scores) / max(len(cer_scores), 1)

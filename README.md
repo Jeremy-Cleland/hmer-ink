@@ -273,6 +273,36 @@ The system uses an encoder-decoder architecture:
 - Beam search decoding for better prediction quality
 - Batched processing and data caching
 
+## Future Development
+
+### Adaptation to Image-Based Recognition
+
+The current model is designed for handwritten ink strokes (online recognition), but the architecture can be adapted for image-based math recognition (offline recognition):
+
+1. **Input Layer Adaptation**:
+   - Replace the stroke encoder (currently uses x, y, t, pen_state) with a vision encoder (CNN or Vision Transformer)
+   - Keep the transformer decoder architecture unchanged
+   - Add a connection layer between image features and the transformer decoder
+
+2. **Implementation Path**:
+   - Modify `encoder.py` to include a new `ImageEncoder` class 
+   - Update the model configuration to support image inputs
+   - Create an image dataset class alongside the existing ink dataset
+
+3. **Benefits of Current Design**:
+   - The modular architecture separates encoder/decoder components
+   - The decoder logic for generating LaTeX is independent of input type
+   - Training on stroke data creates a strong foundation for LaTeX generation
+
+This transition would enable the model to work with scanned mathematical expressions and digital images of handwritten math.
+
+### Other Potential Extensions
+
+- **Multi-modal input**: Support for both stroke and image inputs in a single model
+- **Pre-training strategies**: Self-supervised pre-training on large unlabeled datasets
+- **Language-specific adaptations**: Support for other mathematical notation systems
+- **Transfer learning**: Fine-tuning on domain-specific mathematical expressions
+
 ## License
 
 See the LICENSE file for details.
