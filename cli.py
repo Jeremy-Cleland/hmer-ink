@@ -8,8 +8,12 @@ from typing import Optional
 
 import typer
 
-# Create Typer app
+# Create Typer app with subcommands
 app = typer.Typer(help="HMER-Ink: Handwritten Mathematical Expression Recognition")
+monitor_app = typer.Typer(help="Monitor training metrics")
+
+# Register subcommands
+app.add_typer(monitor_app, name="monitor", help="Monitor and visualize training metrics")
 
 # Add import path
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
@@ -267,6 +271,87 @@ def visualize_command(
         plt.show()
 
     plt.close(fig)
+
+
+@monitor_app.command("extract")
+def extract_metrics_command(
+    wandb_dir: str = typer.Option(
+        "wandb", "--wandb-dir", "-w", help="Directory containing wandb files"
+    ),
+    output_dir: str = typer.Option(
+        "outputs/training_metrics",
+        "--output-dir",
+        "-o",
+        help="Directory to save extracted metrics and visualizations",
+    ),
+):
+    """Extract training metrics from wandb and generate visualizations."""
+    from scripts.training_monitor import extract_from_wandb
+
+    typer.echo(f"Extracting training metrics from {wandb_dir} to {output_dir}")
+    extract_from_wandb(wandb_dir, output_dir)
+
+
+@monitor_app.command("watch")
+def watch_metrics_command(
+    metrics_file: str = typer.Option(
+        "outputs/training_metrics/training_metrics.json",
+        "--metrics-file",
+        "-m",
+        help="Path to metrics JSON file",
+    ),
+    refresh_rate: int = typer.Option(
+        300, "--refresh", "-r", help="Refresh rate in seconds"
+    ),
+):
+    """Watch training metrics and update visualizations periodically."""
+    from scripts.training_monitor import watch_training
+
+    typer.echo(f"Watching training metrics in {metrics_file}")
+    typer.echo("Press Ctrl+C to stop")
+    watch_training(metrics_file, refresh_rate)
+
+
+@monitor_app.command("dashboard")
+def dashboard_command(
+    metrics_dir: str = typer.Option(
+        "outputs/training_metrics",
+        "--metrics-dir",
+        "-d",
+        help="Directory containing training metrics",
+    ),
+    port: int = typer.Option(8501, "--port", "-p", help="Port to run dashboard on"),
+):
+    """Launch an interactive dashboard for monitoring training."""
+    try:
+        import streamlit.web.cli as stcli
+        import sys
+        import os
+
+        # Change to the directory of the script
+        os.chdir(os.path.dirname(os.path.abspath(__file__)))
+        
+        # Path to the dashboard script
+        dashboard_path = os.path.join("scripts", "dashboard.py")
+        
+        # Check if dashboard script exists, if not create it
+        if not os.path.exists(dashboard_path):
+            from scripts.training_monitor import create_dashboard
+            create_dashboard()
+        
+        # Launch the dashboard
+        sys.argv = [
+            "streamlit", 
+            "run", 
+            dashboard_path,
+            "--",  # Arguments after this go to the script
+            "--metrics_dir", metrics_dir
+        ]
+        sys.exit(stcli.main())
+    except ImportError:
+        typer.echo("Streamlit is required to run the dashboard. Install with: pip install streamlit")
+        typer.echo("Then run: pip install altair")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

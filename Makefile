@@ -1,6 +1,6 @@
 # Makefile for HMER-Ink project
 
-.PHONY: clean-pyc clean-outputs clean-all lint lint-fix format typecheck check-all train train-fast evaluate test
+.PHONY: clean-pyc clean-outputs clean-all lint lint-fix format typecheck check-all train train-fast evaluate test visualize-training watch-training dashboard
 
 clean-pyc:
 	find . -name '*.pyc' -exec rm -f {} +
@@ -169,3 +169,45 @@ report:
 		OUTPUT_PATH=$(OUTPUT); \
 	fi; \
 	python scripts/generate_report.py --model $(MODEL) --output $$OUTPUT_PATH
+
+# Extract training metrics from wandb and generate visualizations
+# Usage: make visualize-training [WANDB_DIR=wandb] [OUTPUT_DIR=outputs/training_metrics]
+visualize-training:
+	@WANDB_DIR="wandb"; \
+	if [ -n "$(WANDB_DIR)" ]; then \
+		WANDB_DIR=$(WANDB_DIR); \
+	fi; \
+	OUTPUT_DIR="outputs/training_metrics"; \
+	if [ -n "$(OUTPUT_DIR)" ]; then \
+		OUTPUT_DIR=$(OUTPUT_DIR); \
+	fi; \
+	echo "Extracting training metrics from $$WANDB_DIR to $$OUTPUT_DIR"; \
+	python cli.py monitor extract --wandb-dir $$WANDB_DIR --output-dir $$OUTPUT_DIR
+
+# Watch training metrics and update visualizations
+# Usage: make watch-training [METRICS_FILE=outputs/training_metrics/training_metrics.json] [REFRESH=300]
+watch-training:
+	@METRICS_FILE="outputs/training_metrics/training_metrics.json"; \
+	if [ -n "$(METRICS_FILE)" ]; then \
+		METRICS_FILE=$(METRICS_FILE); \
+	fi; \
+	REFRESH=300; \
+	if [ -n "$(REFRESH)" ]; then \
+		REFRESH=$(REFRESH); \
+	fi; \
+	echo "Watching training metrics in $$METRICS_FILE (refreshing every $$REFRESH seconds)"; \
+	python cli.py monitor watch --metrics-file $$METRICS_FILE --refresh-rate $$REFRESH
+
+# Launch interactive training dashboard
+# Usage: make dashboard [METRICS_DIR=outputs/training_metrics] [PORT=8501]
+dashboard:
+	@METRICS_DIR="outputs/training_metrics"; \
+	if [ -n "$(METRICS_DIR)" ]; then \
+		METRICS_DIR=$(METRICS_DIR); \
+	fi; \
+	PORT=8501; \
+	if [ -n "$(PORT)" ]; then \
+		PORT=$(PORT); \
+	fi; \
+	echo "Launching training dashboard for $$METRICS_DIR on port $$PORT"; \
+	python cli.py monitor dashboard --metrics-dir $$METRICS_DIR --port $$PORT

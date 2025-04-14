@@ -599,6 +599,25 @@ def train(
 
         # Update wandb
         if config["output"].get("use_wandb", False):
+            # Collect error examples from validation
+            error_examples = []
+
+            # Only proceed if validation was actually performed
+            if hasattr(val_metrics, "get") and val_metrics.get("num_samples", 0) > 0:
+                # Try to get a few error examples from the latest validation run
+                # This requires having access to the predictions and targets
+                # Since we don't directly have those, we'll just log the metrics
+                pass
+
+                # A more complete implementation would gather examples from validation
+                # when it's run, and pass them along with metrics
+
+                # For example:
+                # if 'predictions' in locals() and 'targets' in locals():
+                #    num_examples = min(5, len(predictions))
+                #    ...
+
+            # Log to wandb
             wandb.log(
                 {
                     "epoch": epoch,
@@ -606,6 +625,25 @@ def train(
                     **{f"val_{k}": v for k, v in val_metrics.items()},
                 }
             )
+
+            # Also log to our training monitor
+            try:
+                from scripts.training_monitor import capture_training_metrics
+
+                # Create metrics dict with train and val metrics
+                monitor_metrics = {
+                    "epoch": epoch,
+                    "train_loss": train_metrics["loss"],
+                    "global_step": epoch * len(train_loader),
+                    **{f"val_{k}": v for k, v in val_metrics.items()},
+                }
+
+                # Log to our monitor
+                capture_training_metrics(monitor_metrics, error_examples)
+            except ImportError:
+                logging.info(
+                    "Training monitor not found. Metrics only logged to wandb."
+                )
 
         # Update scheduler if using ReduceLROnPlateau
         if scheduler is not None:
