@@ -43,7 +43,7 @@ class InkmlParser:
         # Extract strokes (traces)
         strokes = []
         for trace in root.findall("inkml:trace", ns):
-            trace_id = trace.get("id")
+            # trace_id = trace.get("id")  # Not used currently
             points_str = trace.text.strip()
             points = []
 

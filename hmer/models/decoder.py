@@ -102,26 +102,28 @@ class TransformerDecoder(nn.Module):
         if memory_key_padding_mask is not None:
             # Use memory mask instead of memory_key_padding_mask
             if memory_key_padding_mask.dtype == torch.bool:
-                # Create a cross-attention mask with shape [tgt_len, src_len] 
+                # Create a cross-attention mask with shape [tgt_len, src_len]
                 # For Transformer, the memory mask should have shape [tgt_len, src_len]
                 tgt_len = tgt.size(1)
                 src_len = memory.size(1)
-                
+
                 # First expand the padding mask to shape [batch_size, tgt_len, src_len]
-                expanded_mask = memory_key_padding_mask.unsqueeze(1).expand(-1, tgt_len, -1)
-                
-                # Then create a mask of shape [tgt_len, src_len] where each position 
+                expanded_mask = memory_key_padding_mask.unsqueeze(1).expand(
+                    -1, tgt_len, -1
+                )
+
+                # Then create a mask of shape [tgt_len, src_len] where each position
                 # is masked if ANY batch element is masked at that position
                 memory_mask = torch.zeros(
-                    (tgt_len, src_len), 
-                    device=memory_key_padding_mask.device, 
-                    dtype=torch.float
+                    (tgt_len, src_len),
+                    device=memory_key_padding_mask.device,
+                    dtype=torch.float,
                 )
-                
+
                 # If any batch element has padding at a source position, mask it for all batches
                 # We first collapse the batch dimension with a logical OR
                 combined_mask = expanded_mask.any(dim=0)
-                memory_mask.masked_fill_(combined_mask, float('-inf'))
+                memory_mask.masked_fill_(combined_mask, float("-inf"))
             else:
                 # If the mask is already a float mask, reshape it to [tgt_len, src_len]
                 tgt_len = tgt.size(1)

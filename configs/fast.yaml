@@ -43,7 +43,7 @@ model:
 
 # Training settings - optimized for speed
 training:
-  batch_size: 16  # Original batch size for faster training
+  batch_size: 64  # Original batch size for faster training
   learning_rate: 0.0005  # Slightly higher for faster convergence
   weight_decay: 0.0001
   num_epochs: 50  # Fewer epochs
@@ -57,7 +57,7 @@ training:
   use_amp: true  # Mixed precision for faster training
   device: "mps"  # For Apple Silicon
   num_workers: 4
-  gradient_accumulation_steps: 8  # Original steps
+  gradient_accumulation_steps: 8 # Original steps
   save_every_n_epochs: 2  # Save less frequently
   validate_every_n_steps: 5000  # Validate less frequently
   clip_grad_norm: 1.0
@@ -74,7 +74,7 @@ mps_configuration:
 
 # Evaluation settings
 evaluation:
-  batch_size: 4  # Much smaller batch size to avoid OOM during validation
+  batch_size: 32
   device: "mps"
   metrics: ["edit_distance", "expression_recognition_rate", "symbol_accuracy"]
   beam_size: 2  # Smaller beam size for faster evaluation

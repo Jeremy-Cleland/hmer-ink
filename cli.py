@@ -166,7 +166,8 @@ def predict_command(
     if visualize:
         try:
             import matplotlib.pyplot as plt
-            import numpy as np
+
+            # numpy imported but unused
             from matplotlib.backends.backend_pdf import PdfPages
 
             # Create figure
