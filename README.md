@@ -410,3 +410,11 @@ This transition would enable the model to work with scanned mathematical express
 ## License
 
 See the LICENSE file for details.
+
+## Cloud Deployment
+
+For training on cloud-based GPUs:
+
+- **Lambda Labs**: See [Lambda Labs Setup Guide](LAMBDA_SETUP.md) and [Lambda Labs Workflow](docs/LAMBDA_WORKFLOW.md)
+- **AWS EC2**: See [AWS Deployment Guide](docs/HMER_CLOUD_DEPLOYMENT.md)
+- **Google Colab**: See [Colab Setup](docs/HMER_CLOUD_DEPLOYMENT.md#alternative-setup-google-colab-pro)

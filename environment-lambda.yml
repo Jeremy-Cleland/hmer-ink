@@ -1,0 +1,77 @@
+name: hmer-ink
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - numpy
+  - pandas
+  - matplotlib
+  - seaborn
+  - scikit-learn
+  - scikit-image
+  - plotly
+  - opencv
+  - pillow
+  - omegaconf
+  - typer
+  - pyyaml
+  - jinja2
+  - tqdm
+  - optuna
+  - pytest
+  - black
+  - isort
+  - flake8
+  - ruff
+  - pydantic
+  - mypy
+  - shap
+  - wandb
+  - networkx
+  - levenshtein
+  - editdistance
+  - albumentations
+  - cudatoolkit=11.8
+  - pytorch=2.0.1
+  - torchvision
+  - torchaudio
+  - pip
+  - pip:
+      # Core ML/DL
+      - torchmetrics
+      - tensorboard
+      
+      # CLI and utilities
+      - rich
+      
+      # Dashboard and reporting
+      - streamlit>=1.26.0
+      - altair>=5.0.0
+      - tabulate
+      - kaleido
+      - umap-learn
+      
+      # Graph neural networks
+      - dgl-cuda11.8
+      - torch-geometric
+      
+      # LaTeX utilities
+      - sympy
+      - pylatexenc
+      - latex2mathml
+      
+      # Additional packages for architectures
+      - timm  # For vision transformer components
+      - transformers  # For language model components
+      - diffusers  # For DDPM augmentation
+
+variables:
+  CUDA_VISIBLE_DEVICES: "0"
+  PYTORCH_CUDA_ALLOC_CONF: "max_split_size_mb:128"
+  OMP_NUM_THREADS: "16"
+  MKL_NUM_THREADS: "16"
+  NO_ALBUMENTATIONS_UPDATE: "1"
+  HDF5_USE_FILE_LOCKING: "FALSE" 

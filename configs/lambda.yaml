@@ -1,5 +1,5 @@
-# Optimized Training Configuration for HMER-Ink
-# Balanced for reliable convergence with good performance
+# Optimized Training Configuration for HMER-Ink on Lambda Labs
+# Balanced for reliable convergence with good performance on NVIDIA GPUs
 
 # Data settings
 data:
@@ -51,43 +51,33 @@ model:
     dropout: 0.1
     max_length: 224
 
-# Training settings - optimized for reliable convergence
+# Training settings - optimized for Lambda Labs GPU
 training:
-  batch_size: 32
-  learning_rate: 0.0003 # Higher starting LR to help model learn faster
+  batch_size: 128  # Increased batch size for GPU
+  learning_rate: 0.0003
   weight_decay: 0.00007
   num_epochs: 100
   early_stopping_patience: 15
   lr_scheduler:
-    type: "one_cycle" # Use one cycle for better convergence
-    max_lr: 0.001 # Higher peak learning rate to accelerate early learning
-    pct_start: 0.1 # Reach peak LR earlier in training
-    div_factor: 3.0 # Initial LR = max_lr/div_factor
-    final_div_factor: 10.0 # Final LR = initial_lr/final_div_factor
+    type: "one_cycle"
+    max_lr: 0.001
+    pct_start: 0.1
+    div_factor: 3.0
+    final_div_factor: 10.0
   optimizer: "adamw"
-  use_amp: true
-  device: "mps"
-  num_workers: 4
-  gradient_accumulation_steps: 6
+  use_amp: true  # Use mixed precision for faster training
+  device: "cuda"  # Use CUDA for Lambda Labs GPUs
+  num_workers: 8  # Increased for faster data loading
+  gradient_accumulation_steps: 1  # Reduced for larger batch size
   save_every_n_epochs: 2
   validate_every_n_steps: 1000
   clip_grad_norm: 1.0
-  label_smoothing: 0.1 # Add label smoothing for regularization
-
-# MPS specific optimizations
-mps_configuration:
-  enable_mps_fallback: true
-  verbose: false
-  high_watermark_ratio: 0.0
-  prefer_channels_last: true
-  enable_early_graph_capture: true
-  separate_device_alloc: true
-  use_system_allocator: true
+  label_smoothing: 0.1
 
 # Evaluation settings
 evaluation:
-  batch_size: 32
-  device: "mps"
+  batch_size: 128  # Increased for GPU
+  device: "cuda"   # Use CUDA
   metrics:
     [
       "edit_distance",
@@ -108,9 +98,9 @@ output:
   metrics_dir: "metrics"
 
   use_wandb: true
-  project_name: "hmer-ink-m4-max"
+  project_name: "hmer-ink-lambda"
   tensorboard: false
   save_best_k: 3
   monitor_metric: "val_loss" # Monitor validation loss for early stopping
   monitor_mode: "min"
-  record_metrics: true
+  record_metrics: true 
