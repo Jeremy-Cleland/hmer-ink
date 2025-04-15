@@ -196,35 +196,62 @@ class TransformerEncoder(nn.Module):
 
                 # Process each bounding box
                 for bbox in sample_bbox_data:
-                    # Extract bbox coordinates, normalize to [-1, 1] range if not already
+                    # Extract bbox coordinates and normalize to [-1, 1] range
+                    # Handle both naming conventions (snake_case or camelCase)
+                    x_min = bbox.get("x_min", bbox.get("xMin", 0))
+                    y_min = bbox.get("y_min", bbox.get("yMin", 0))
+                    x_max = bbox.get("x_max", bbox.get("xMax", 1))
+                    y_max = bbox.get("y_max", bbox.get("yMax", 1))
+
+                    # Normalize coordinates if they're not already in the expected range
+                    if (
+                        abs(x_min) > 10
+                        or abs(y_min) > 10
+                        or abs(x_max) > 10
+                        or abs(y_max) > 10
+                    ):
+                        # Assume these are unnormalized coordinates, normalize them to [-1, 1]
+                        max_coord = max(abs(x_min), abs(y_min), abs(x_max), abs(y_max))
+                        x_min = x_min / max_coord
+                        y_min = y_min / max_coord
+                        x_max = x_max / max_coord
+                        y_max = y_max / max_coord
+
                     bbox_coords = torch.tensor(
-                        [
-                            bbox.get("x_min", 0),
-                            bbox.get("y_min", 0),
-                            bbox.get("x_max", 1),
-                            bbox.get("y_max", 1),
-                        ],
+                        [x_min, y_min, x_max, y_max],
                         dtype=torch.float32,
                         device=x.device,
                     )
 
-                    # Process bbox data
-                    if "symbol_id" in bbox and "point_indices" in bbox:
-                        # Get corresponding point indices for this bbox
+                    # Convert bbox to embedding
+                    bbox_embed = self.bbox_embedding(bbox_coords.view(1, -1))
+                    bbox_embed = F.relu(bbox_embed)
+                    bbox_embed = self.bbox_norm(bbox_embed)
+
+                    # Check if we have point indices or token information
+                    if "point_indices" in bbox:
+                        # Use provided point indices
                         point_indices = bbox["point_indices"]
-
-                        # Convert bbox to embedding
-                        bbox_embed = self.bbox_embedding(bbox_coords.view(1, -1))
-                        bbox_embed = F.relu(bbox_embed)
-                        bbox_embed = self.bbox_norm(bbox_embed)
-
-                        # Add bbox embedding to corresponding points
                         for idx in point_indices:
                             if idx < seq_len:
                                 # Add bbox information to the point features
                                 x[batch_idx, idx] = x[
                                     batch_idx, idx
                                 ] + bbox_embed.squeeze(0)
+                    elif "token" in bbox:
+                        # For token-based bboxes, apply to a segment of the sequence
+                        # This is a heuristic approach since we don't have explicit point mappings
+                        segment_size = seq_len // 10  # Approximate segment size
+                        start_idx = min(
+                            int((x_min + 1) * seq_len / 2), seq_len - segment_size
+                        )
+                        end_idx = min(start_idx + segment_size, seq_len)
+
+                        # Apply bbox embedding to this segment
+                        for idx in range(start_idx, end_idx):
+                            x[batch_idx, idx] = x[batch_idx, idx] + bbox_embed.squeeze(
+                                0
+                            )
 
         # Apply transformer encoder
         # Note: In PyTorch transformer, True in mask means to ignore that position

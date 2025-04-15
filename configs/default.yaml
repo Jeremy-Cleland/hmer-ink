@@ -54,15 +54,15 @@ model:
 # Training settings - optimized for reliable convergence
 training:
   batch_size: 64
-  learning_rate: 0.0001 # Start with lower LR
+  learning_rate: 0.0003 # Higher starting LR to help model learn faster
   weight_decay: 0.00007
   num_epochs: 100
   early_stopping_patience: 15
   lr_scheduler:
     type: "one_cycle" # Use one cycle for better convergence
-    max_lr: 0.0006 # Peak learning rate
-    pct_start: 0.2 # Reach peak LR after 20% of training
-    div_factor: 6.0 # Initial LR = max_lr/div_factor
+    max_lr: 0.001 # Higher peak learning rate to accelerate early learning
+    pct_start: 0.1 # Reach peak LR earlier in training
+    div_factor: 3.0 # Initial LR = max_lr/div_factor
     final_div_factor: 10.0 # Final LR = initial_lr/final_div_factor
   optimizer: "adamw"
   use_amp: true

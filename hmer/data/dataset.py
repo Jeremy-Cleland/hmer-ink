@@ -281,7 +281,17 @@ class HMERSyntheticDataset(HMERDataset):
 
             if label in self.bboxes:
                 bbox_data = self.bboxes[label]
-                sample["bbox_data"] = bbox_data.get("bboxes", [])
+                bbox_list = bbox_data.get("bboxes", [])
+
+                # Ensure bounding boxes are valid
+                valid_bboxes = []
+                for bbox in bbox_list:
+                    if all(
+                        key in bbox for key in ["xMin", "yMin", "xMax", "yMax", "token"]
+                    ):
+                        valid_bboxes.append(bbox)
+
+                sample["bbox_data"] = valid_bboxes
 
         return sample
 

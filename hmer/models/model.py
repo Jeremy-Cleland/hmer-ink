@@ -184,6 +184,9 @@ class HMERModel(nn.Module):
         device: torch.device,
     ) -> Tuple[List[List[List[int]]], List[List[float]]]:
         """
+        Modified implementation to address early EOS token prediction issue
+        """
+        """
         Fast beam search implementation optimized for validation during training.
 
         Args:
@@ -312,14 +315,28 @@ class HMERModel(nn.Module):
                     if not is_finished[i]:
                         token = next_tokens[i].item()
 
-                        # Check if sequence is finished
-                        if token == self.eos_token_id:
+                        # Only consider sequence finished if EOS token appears after minimum length
+                        # This prevents early EOS predictions
+                        if (
+                            token == self.eos_token_id and sequences.size(1) >= 5
+                        ):  # Minimum sequence length
                             is_finished[i] = True
                             # Store this completed sequence
                             all_beams[i] = [sequences[i].tolist()]
                             all_scores[i] = [
                                 0.0
                             ]  # Simplified score for fast validation
+                        elif token == self.eos_token_id:
+                            # If EOS is predicted too early, ignore it and replace with second-best token
+                            if probs.size(1) > 1:  # Make sure there's a second option
+                                # Get second-best token (excluding EOS)
+                                second_best_tokens = torch.topk(
+                                    probs[i], k=min(5, probs.size(1))
+                                )[1]
+                                for alt_token in second_best_tokens:
+                                    if alt_token.item() != self.eos_token_id:
+                                        next_tokens[i] = alt_token
+                                        break
 
                 # Prepare next iteration - add tokens to sequences that aren't finished
                 if not is_finished.all():
@@ -384,13 +401,21 @@ class HMERModel(nn.Module):
                             -token_logprob
                         )  # Negative log prob as score
 
-                        # If EOS token and best candidate, mark as finished
-                        if token == self.eos_token_id and j == 0:
+                        # Only consider sequence finished if EOS token appears after minimum length
+                        # This prevents early EOS predictions
+                        if (
+                            token == self.eos_token_id
+                            and j == 0
+                            and new_seq.size(1) >= 5
+                        ):  # Minimum length check
                             is_finished[i] = True
                             # Store completed sequence
                             all_beams[i] = [new_seq[0].tolist()]
                             all_scores[i] = [-token_logprob]
                             break
+                        elif token == self.eos_token_id and new_seq.size(1) < 5:
+                            # If sequence is too short, don't add EOS, try next best token
+                            continue
 
                     # If not finished yet, continue with best sequence
                     if not is_finished[i]:
@@ -585,9 +610,14 @@ class HMERModel(nn.Module):
             # Select top-k candidates
             beams = []
             for tokens, score, token_id in candidates[:beam_size]:
-                # Check if sequence is completed
-                if token_id == self.eos_token_id:
+                # Check if sequence is completed - require minimum length to prevent early EOS
+                if token_id == self.eos_token_id and tokens.size(1) >= 5:
                     completed_beams.append((tokens, score))
+                elif token_id == self.eos_token_id:
+                    # If EOS predicted too early, treat as a regular token to allow sequence to grow
+                    beams.append(
+                        (tokens, score * 1.1)
+                    )  # Slight penalty for early EOS prediction
                 else:
                     beams.append((tokens, score))
 
