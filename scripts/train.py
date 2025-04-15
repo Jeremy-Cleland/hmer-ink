@@ -20,6 +20,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from hmer.config import get_device, get_optimizer, get_scheduler, load_config
 from hmer.data.dataset import HMERDataset
+from hmer.data.curriculum import CurriculumDataset, CurriculumSampler
 from hmer.data.transforms import get_eval_transforms, get_train_transforms
 from hmer.models import create_model
 from hmer.utils.error_analysis import analyze_errors
@@ -548,6 +549,17 @@ def train(
     use_synthetic = data_config.get("use_synthetic", False)
     contains_synthetic = any("synthetic" in dir_name for dir_name in train_dirs)
 
+    # Check if curriculum learning is enabled
+    curriculum_config = data_config.get("curriculum", {})
+    use_curriculum = curriculum_config.get("enabled", False)
+    curriculum_metric = curriculum_config.get("metric", "token_length")
+    epochs_to_full_difficulty = curriculum_config.get("epochs_to_full_difficulty", 15)
+
+    # Initialize training state
+    start_epoch = 0
+    best_metric = float("inf")
+    
+    # Create the appropriate dataset based on configuration
     if use_synthetic and contains_synthetic:
         # Use the synthetic dataset with bounding box information
         logging.info("Using HMERSyntheticDataset with bounding box information")
@@ -567,6 +579,27 @@ def train(
             time_range=time_range,
             preserve_aspect_ratio=preserve_aspect_ratio,
         )
+    elif use_curriculum:
+        # Use curriculum dataset
+        logging.info(f"Using CurriculumDataset with {curriculum_metric} difficulty metric")
+        train_dataset = CurriculumDataset(
+            data_dir=data_dir,
+            split_dirs=train_dirs,
+            tokenizer=tokenizer,
+            max_seq_length=data_config.get("max_seq_length", 512),
+            max_token_length=data_config.get("max_token_length", 128),
+            transform=train_transform,
+            normalize=normalize,
+            use_relative_coords=True,
+            x_range=x_range,
+            y_range=y_range,
+            time_range=time_range,
+            preserve_aspect_ratio=preserve_aspect_ratio,
+            difficulty_metric=curriculum_metric,
+        )
+        
+        # Pre-calculate difficulties for faster sampling
+        train_dataset.calculate_difficulties()
     else:
         # Use the regular dataset
         train_dataset = HMERDataset(
@@ -620,17 +653,44 @@ def train(
     if dataloader_seed is not None:
         seed_all(dataloader_seed)
 
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=batch_size,
-        shuffle=True,
-        num_workers=num_workers,
-        pin_memory=False,
-        prefetch_factor=prefetch_factor if num_workers > 0 else None,
-        persistent_workers=persistent_workers if num_workers > 0 else False,
-        collate_fn=train_dataset.collate_fn,
-        generator=g,
-    )
+    # Create sampler for curriculum learning if enabled
+    sampler = None
+    if use_curriculum:
+        logging.info(f"Using CurriculumSampler with {epochs_to_full_difficulty} epochs to reach full difficulty")
+        sampler = CurriculumSampler(
+            dataset=train_dataset,
+            difficulty_metric=curriculum_metric,
+            epochs_to_full_difficulty=epochs_to_full_difficulty,
+            current_epoch=start_epoch,
+            shuffle=True,
+            seed=dataloader_seed,
+        )
+        
+        # When using a custom sampler, don't shuffle the dataloader
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=batch_size,
+            sampler=sampler,  # Use curriculum sampler
+            num_workers=num_workers,
+            pin_memory=False,
+            prefetch_factor=prefetch_factor if num_workers > 0 else None,
+            persistent_workers=persistent_workers if num_workers > 0 else False,
+            collate_fn=train_dataset.collate_fn,
+            generator=g,
+        )
+    else:
+        # Standard dataloader with shuffling
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=batch_size,
+            shuffle=True,
+            num_workers=num_workers,
+            pin_memory=False,
+            prefetch_factor=prefetch_factor if num_workers > 0 else None,
+            persistent_workers=persistent_workers if num_workers > 0 else False,
+            collate_fn=train_dataset.collate_fn,
+            generator=g,
+        )
 
     valid_loader = DataLoader(
         valid_dataset,
@@ -659,6 +719,12 @@ def train(
     # Calculate steps per epoch for batch-based schedulers
     if scheduler_type in ["one_cycle", "linear_warmup"]:
         steps_per_epoch = len(train_loader) // grad_accum_steps
+        
+        # Ensure we have at least 1 step per epoch
+        if steps_per_epoch <= 0:
+            steps_per_epoch = 1
+            logging.warning("Calculated steps_per_epoch was 0, setting to 1 to avoid scheduler error")
+            
         train_config["lr_scheduler"]["steps_per_epoch"] = steps_per_epoch
         train_config["lr_scheduler"]["epochs"] = num_epochs
 
@@ -668,7 +734,7 @@ def train(
             )
         elif scheduler_type == "linear_warmup":
             warmup_steps = train_config.get("lr_scheduler", {}).get("warmup_steps", 100)
-            warmup_epochs = warmup_steps / steps_per_epoch if steps_per_epoch > 0 else 0
+            warmup_epochs = warmup_steps / steps_per_epoch
             logging.info(
                 f"LinearWarmup: Warmup for {warmup_steps} steps (~{warmup_epochs:.1f} epochs)"
             )
@@ -680,10 +746,6 @@ def train(
     criterion = nn.CrossEntropyLoss(
         ignore_index=0, label_smoothing=label_smoothing
     )  # Ignore padding token (index 0)
-
-    # Initialize training state
-    start_epoch = 0
-    best_metric = float("inf")
 
     # Load checkpoint if provided
     if checkpoint_path is not None and os.path.exists(checkpoint_path):
@@ -739,6 +801,35 @@ def train(
     no_improvement = 0
 
     for epoch in range(start_epoch, num_epochs):
+        # Update curriculum sampler if using curriculum learning
+        if use_curriculum and sampler is not None:
+            sampler.set_epoch(epoch)
+            # Log detailed curriculum progress information
+            curriculum_progress = sampler.curr_percentile
+            num_total_samples = len(sampler.sorted_indices)
+            num_active_samples = len(sampler)
+            active_percent = 100 * num_active_samples / max(1, num_total_samples)
+            
+            # Estimate difficulty range being used
+            if hasattr(train_dataset, 'difficulty_stats') and train_dataset.difficulty_stats.get('percentiles'):
+                percentiles = train_dataset.difficulty_stats.get('percentiles', {})
+                if percentiles and 95 in percentiles and 5 in percentiles:
+                    lower_bound = train_dataset.difficulty_stats.get('min', 0)
+                    curr_upper_bound = lower_bound + curriculum_progress * (train_dataset.difficulty_stats.get('max', 10) - lower_bound)
+                    active_percentile = min(round(curriculum_progress * 100), 100)
+                    
+                    logging.info(f"Curriculum learning: Epoch {epoch}/{num_epochs}")
+                    logging.info(f"  Progress: {curriculum_progress*100:.1f}% of difficulty range")
+                    logging.info(f"  Using {num_active_samples}/{num_total_samples} samples ({active_percent:.1f}%)")
+                    logging.info(f"  Active difficulty range: {lower_bound:.1f} - {curr_upper_bound:.1f}")
+                    logging.info(f"  Using samples up to ~{active_percentile}th percentile of difficulty")
+                else:
+                    logging.info(f"Curriculum learning: Epoch {epoch}/{num_epochs} - {curriculum_progress*100:.1f}% of difficulty range")
+                    logging.info(f"  Using {num_active_samples}/{num_total_samples} samples ({active_percent:.1f}%)")
+            else:
+                logging.info(f"Curriculum learning: Epoch {epoch}/{num_epochs} - {curriculum_progress*100:.1f}% of difficulty range")
+                logging.info(f"  Using {num_active_samples}/{num_total_samples} samples ({active_percent:.1f}%)")
+            
         # Train for one epoch
         train_metrics = train_epoch(
             model,

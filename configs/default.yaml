@@ -4,12 +4,16 @@
 # Data settings
 data:
   data_dir: "data"
-  train_dirs: ["train", "symbols", "synthetic"] # Include synthetic data with bounding boxes
+  train_dirs: ["train", "symbols"] # Using only train and symbols data (no synthetic)
   valid_dir: "valid"
   test_dir: "test"
   max_seq_length: 384
   max_token_length: 224
-  use_synthetic: true # Enable synthetic data with bounding boxes
+  use_synthetic: false # Set to false to avoid using synthetic data which increases training time
+  curriculum:
+    enabled: false # Enable curriculum learning (easy to hard)
+    metric: "token_length" # Options: token_length, seq_length
+    epochs_to_full_difficulty: 15 # Number of epochs until full difficulty range
   vocab_random_seed: 42
   dataloader_seed: 42 # Fixed seed for DataLoader to ensure consistent batching
   vocab_file: "vocab.json"

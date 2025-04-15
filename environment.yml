@@ -1,4 +1,4 @@
-name: prime-vit
+name: hmer-ink
 channels:
   - pytorch
   - conda-forge
